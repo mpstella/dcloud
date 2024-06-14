@@ -1,0 +1,19 @@
+{
+  "display_name": "Test 123 this is my request",
+  "description": "This is a test template deployed by dcloud",
+  "machine_spec": {
+    "machine_type": "e2-standard-2"
+  },
+  "data_persistent_disk_spec": {
+    "disk_type": "pd-standard",
+    "disk_size_gb": 10
+  },
+  "network_spec": {
+    "enable_internet_access": true
+  },
+  "idle_shutdown_config": {
+    "idle_timeout": {
+      "seconds": 600
+    }
+  }
+}
