@@ -13,6 +13,12 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+
     steps:
     - uses: actions/checkout@v4
 
@@ -21,11 +27,14 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Build the binary
-      run: go build -o dcloud
+    - name: Build binary
+      run: |
+        mkdir -p build/${{ matrix.goos }}-${{ matrix.goarch }}
+        GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o build/${{ matrix.goos }}-${{ matrix.goarch }}/dcloud main.go
 
-    - name: Archive production artifacts
-      uses: actions/upload-artifact@v2
+
+    - name: Upload binaries
+      uses: actions/upload-artifact@v3
       with:
-        name: dcloud
-        path: dcloud
+        name: dcloud-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: build/${{ matrix.goos }}-${{ matrix.goarch }}/dcloud*        
