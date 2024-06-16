@@ -2,14 +2,16 @@ package gcp
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
+
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
-	"google.golang.org/protobuf/types/known/durationpb"
-	"log"
-	"os"
 
 	aiplatform "cloud.google.com/go/aiplatform/apiv1"
 	aiplatformpb "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
@@ -19,55 +21,86 @@ const location = "australia-southeast1"
 const endPoint = "australia-southeast1-aiplatform.googleapis.com:443"
 const scopes = "https://www.googleapis.com/auth/cloud-platform"
 
+type RuntimeTemplate struct {
+	Name        string `json:"Name"`
+	DisplayName string `json:"DisplayName`
+	Description string `json:"Description"`
+	FileHash    string `json:"FileHash"`
+	MachineType string `json:"MachineType"`
+}
+
+type CollabClient struct {
+	projectID         string
+	client            *aiplatform.NotebookClient
+	existingTemplates map[string]RuntimeTemplate
+	isInitialised     bool
+}
+
 func fullyQualifiedParent(projectID string) string {
 	return fmt.Sprintf("projects/%s/locations/%s", projectID, location)
 }
 
-func NewClientUsingFile(path string) *aiplatform.NotebookClient {
-	ctx := context.Background()
-	client, err := aiplatform.NewNotebookClient(ctx,
-		option.WithCredentialsFile(path),
-		option.WithEndpoint(endPoint),
-	)
+func NewCollabClient(projectID string) CollabClient {
+
+	client, err := getClient()
+
 	if err != nil {
 		log.Fatal("Could not create Client", err)
 	}
-	return client
+
+	return CollabClient{
+		projectID:         projectID,
+		client:            client,
+		existingTemplates: make(map[string]RuntimeTemplate),
+		isInitialised:     false,
+	}
 }
 
-func NewClientUsingEnv() *aiplatform.NotebookClient {
-	return NewClientUsingFile(os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-}
+func getClient() (*aiplatform.NotebookClient, error) {
 
-func NewClientUsingADC() *aiplatform.NotebookClient {
 	ctx := context.Background()
+	path := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+	if path != "" {
+
+		fmt.Printf("Logging onto GCP using credentials file: %s\n", path)
+
+		return aiplatform.NewNotebookClient(ctx,
+			option.WithCredentialsFile(path),
+			option.WithEndpoint(endPoint),
+		)
+	}
+
+	fmt.Println("Logging onto GCP using ADC")
+
 	credentials, err := google.FindDefaultCredentials(ctx, scopes)
 	if err != nil {
-		panic("Could not obtain ADC credentials")
+		fmt.Println("Could not obtain ADC credentials")
+		return nil, err
 	}
-	client, err := aiplatform.NewNotebookClient(ctx,
+	return aiplatform.NewNotebookClient(ctx,
 		option.WithCredentials(credentials),
 		option.WithEndpoint(endPoint),
 	)
-	if err != nil {
-		log.Fatal("Could not create Client", err)
-	}
-	return client
 }
 
-func GetNotebookRuntimeTemplates(client *aiplatform.NotebookClient, projectID string) (map[string]string, error) {
+func (c *CollabClient) GetNotebookRuntimeTemplates() map[string]RuntimeTemplate {
 
-	var existingTemplates = make(map[string]string)
+	if c.isInitialised {
+		return c.existingTemplates
+	}
+
+	fmt.Println("Retrieving existing deployed runtime templates ...")
 
 	ctx := context.Background()
 
 	// Define the request to list Notebook Runtime Templates
 	req := &aiplatformpb.ListNotebookRuntimeTemplatesRequest{
-		Parent: fullyQualifiedParent(projectID),
+		Parent: fullyQualifiedParent(c.projectID),
 	}
 
 	// List the Notebook Runtime Templates
-	it := client.ListNotebookRuntimeTemplates(ctx, req)
+	it := c.client.ListNotebookRuntimeTemplates(ctx, req)
 	for {
 		template, err := it.Next()
 		if err == iterator.Done {
@@ -76,15 +109,41 @@ func GetNotebookRuntimeTemplates(client *aiplatform.NotebookClient, projectID st
 		if err != nil {
 			log.Fatalf("Failed to list Notebook Runtime Templates: %v", err)
 		}
-		existingTemplates[template.GetDisplayName()] = template.GetName()
+
+		c.existingTemplates[template.GetDisplayName()] = RuntimeTemplate{
+			Name:        template.GetName(),
+			DisplayName: template.GetDisplayName(),
+			Description: template.GetDescription(),
+			FileHash:    template.GetLabels()["md5"],
+			MachineType: template.MachineSpec.GetMachineType(),
+		}
 	}
-	return existingTemplates, nil
+
+	countOfExisting := len(c.existingTemplates)
+
+	switch countOfExisting {
+	case 0:
+		fmt.Println("Could not find any existing runtime templates")
+	case 1:
+		fmt.Println("Found an existing runtime template")
+	default:
+		fmt.Printf("Found %d existing runtime templates\n", countOfExisting)
+	}
+
+	return c.existingTemplates
 }
 
-func DeployNotebookRuntimeTemplate(client *aiplatform.NotebookClient, projectID string, templateFile string, ensureUnique bool) {
-	ctx := context.Background()
+func (c *CollabClient) Cleanup() {
 
-	var config aiplatformpb.NotebookRuntimeTemplate
+	if c.client != nil {
+		fmt.Println("Closing connection to GCP ...")
+		c.client.Close()
+	}
+}
+
+func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string) {
+
+	ctx := context.Background()
 
 	data, err := os.ReadFile(templateFile)
 
@@ -92,103 +151,80 @@ func DeployNotebookRuntimeTemplate(client *aiplatform.NotebookClient, projectID 
 		log.Fatalf("Error reading file %v\n", err)
 	}
 
+	var config aiplatformpb.NotebookRuntimeTemplate
 	err = json.Unmarshal(data, &config)
 
 	if err != nil {
 		log.Fatalf("Error parsing JSON file: %v", err)
 	}
 
-	if ensureUnique {
-		if GetNotebookRuntimeTemplateNameByDisplayName(client, projectID, config.DisplayName) != "" {
-			fmt.Printf("A template already exists with this Display Name, skipping ...\n")
+	hash := md5.New()
+
+	_, err = hash.Write(data)
+	if err != nil {
+		log.Fatalf("Failed to write data to hash: %v", err)
+	}
+
+	checksum := hex.EncodeToString(hash.Sum(nil))
+
+	if existingTemplate, ok := c.GetNotebookRuntimeTemplates()[config.DisplayName]; ok {
+
+		fmt.Printf("A template already exists with this Display Name, skipping ...\n")
+
+		if checksum == existingTemplate.FileHash {
+			fmt.Printf("Template hash matches ('%s')  skipping ...\n", checksum)
 			return
+		} else {
+			fmt.Println("Will delete existing template and redeploy")
+			c.DeleteNotebookRuntimeTemplate(existingTemplate.DisplayName)
 		}
 	}
 
-	req := &aiplatformpb.CreateNotebookRuntimeTemplateRequest{
-		Parent:                  fullyQualifiedParent(projectID),
-		NotebookRuntimeTemplate: &config,
-		//NotebookRuntimeTemplateId: "my-notebook-runtime-template",
+	if config.Labels == nil {
+		config.Labels = make(map[string]string)
 	}
-	resp, err := client.CreateNotebookRuntimeTemplate(ctx, req)
+
+	config.Labels["md5"] = checksum
+
+	// add some GITHUB goodness if running in CI/CD
+	config.Labels["git_sha"] = os.Getenv("GITHUB_SHA")
+	config.Labels["git_run_id"] = os.Getenv("GITHUB_RUN_ID")
+
+	req := &aiplatformpb.CreateNotebookRuntimeTemplateRequest{
+		Parent:                  fullyQualifiedParent(c.projectID),
+		NotebookRuntimeTemplate: &config,
+	}
+
+	resp, err := c.client.CreateNotebookRuntimeTemplate(ctx, req)
 	if err != nil {
 		log.Fatalf("Failed to create Notebook Runtime Template: %v", err)
 	}
+
+	// add to cache to ensure uniqueness
+	c.existingTemplates[config.DisplayName] = RuntimeTemplate{
+		DisplayName: config.DisplayName,
+		FileHash:    checksum,
+	}
+
 	fmt.Printf("Created Notebook Runtime Template: %v\n", resp)
 }
 
-func GenerateSampleTemplate() {
-
-	machineSpec := &aiplatformpb.MachineSpec{
-		MachineType:     "e2-standard-2",
-		AcceleratorType: aiplatformpb.AcceleratorType_ACCELERATOR_TYPE_UNSPECIFIED,
-	}
-
-	networkSpec := &aiplatformpb.NetworkSpec{
-		EnableInternetAccess: true,
-		Subnetwork:           "subnetwork",
-		Network:              "network",
-	}
-
-	duration := &durationpb.Duration{
-		Seconds: 600,
-	}
-
-	idleShutdownConfig := &aiplatformpb.NotebookIdleShutdownConfig{
-		IdleTimeout:          duration,
-		IdleShutdownDisabled: false,
-	}
-
-	persistentDiskSpec := &aiplatformpb.PersistentDiskSpec{
-		DiskType:   "pd-standard",
-		DiskSizeGb: 10,
-	}
-
-	runtimeTemplate := &aiplatformpb.NotebookRuntimeTemplate{
-		DisplayName:            "Test 123 this is my request",
-		Description:            "This is a test template deployed by dcloud",
-		IsDefault:              false,
-		IdleShutdownConfig:     idleShutdownConfig,
-		MachineSpec:            machineSpec,
-		NetworkSpec:            networkSpec,
-		DataPersistentDiskSpec: persistentDiskSpec,
-	}
-
-	jsonData, err := json.Marshal(runtimeTemplate)
-	if err != nil {
-		fmt.Println("Error converting to JSON", err)
-	}
-	fmt.Println(string(jsonData))
-}
-
-func GetNotebookRuntimeTemplateNameByDisplayName(client *aiplatform.NotebookClient, projectID string, displayName string) string {
-
-	existingTemplates, err := GetNotebookRuntimeTemplates(client, projectID)
-
-	if err != nil {
-		panic("Couldn't get list of existing NotebookRuntimeTemplate")
-	}
-
-	if value, ok := existingTemplates[displayName]; ok {
-		return value
-	}
-	return ""
-
-}
-
-func DeleteNotebookRuntimeTemplate(client *aiplatform.NotebookClient, templateId string) error {
+func (c *CollabClient) DeleteNotebookRuntimeTemplate(displayName string) {
 
 	ctx := context.Background()
 
-	req := &aiplatformpb.DeleteNotebookRuntimeTemplateRequest{
-		Name: templateId,
-	}
+	if template, ok := c.GetNotebookRuntimeTemplates()[displayName]; ok {
 
-	resp, err := client.DeleteNotebookRuntimeTemplate(ctx, req)
-	if err != nil {
-		log.Fatalf("Failed to delete Notebook Runtime Template: %v", err)
-	}
+		fmt.Printf("Found template: %s\n", template.Name)
 
-	fmt.Printf("Deleted Notebook Runtime Template %v\n\n", resp)
-	return err
+		req := &aiplatformpb.DeleteNotebookRuntimeTemplateRequest{
+			Name: template.Name,
+		}
+
+		resp, err := c.client.DeleteNotebookRuntimeTemplate(ctx, req)
+		if err != nil {
+			log.Fatalf("Failed to delete Notebook Runtime Template: %v", err)
+		}
+		fmt.Printf("Deleted Notebook Runtime Template %v\n\n", resp)
+	}
 }
