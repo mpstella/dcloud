@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"dcloud/pkg/gcp"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -14,10 +15,9 @@ var projectID string
 var displayName string
 var templateDirectory string
 
-// rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "dcloud",
-	Short: "DAW gcloud",
+	Short: "DAW gcloud makeshift utility",
 	Long:  `Given we are waiting on Google this is our dodgy gcloud helper`,
 }
 
@@ -27,16 +27,18 @@ var listCmd = &cobra.Command{
 
 	Run: func(cmd *cobra.Command, args []string) {
 
-		client := gcp.NewClientUsingADC()
-		defer client.Close()
+		cc := gcp.NewCollabClient(projectID)
+		defer cc.Cleanup()
 
-		existing, err := gcp.GetNotebookRuntimeTemplates(client, projectID)
+		existingTemplates := cc.GetNotebookRuntimeTemplates()
 
-		if err != nil {
-			panic("Couldn't retrieve existing templates")
-		}
-		for displayName, name := range existing {
-			fmt.Printf("'%s' -> %s\n", displayName, name)
+		for _, template := range existingTemplates {
+			prettyString, err := json.MarshalIndent(template, "", "  ")
+			if err != nil {
+				fmt.Printf("%s\n", template)
+			} else {
+				fmt.Printf("%s\n", string(prettyString))
+			}
 		}
 	},
 }
@@ -47,15 +49,10 @@ var deleteCmd = &cobra.Command{
 
 	Run: func(cmd *cobra.Command, args []string) {
 
-		client := gcp.NewClientUsingADC()
-		defer client.Close()
+		cc := gcp.NewCollabClient(projectID)
+		defer cc.Cleanup()
 
-		templateId := gcp.GetNotebookRuntimeTemplateNameByDisplayName(client, projectID, displayName)
-		fmt.Printf("Found the template: %s\n", templateId)
-
-		if templateId != "" {
-			gcp.DeleteNotebookRuntimeTemplate(client, templateId)
-		}
+		cc.DeleteNotebookRuntimeTemplate(displayName)
 	},
 }
 
@@ -71,32 +68,20 @@ var deployCmd = &cobra.Command{
 			log.Fatalf("Error occurred reading directory %v\n", err)
 		}
 
-		client := gcp.NewClientUsingADC()
-		defer client.Close()
+		cc := gcp.NewCollabClient(projectID)
+		defer cc.Cleanup()
 
 		for _, entry := range templates {
 			if !entry.IsDir() {
 
 				templateFile := filepath.Join(templateDirectory, entry.Name())
 				fmt.Printf("Attempting to deploy %s\n", templateFile)
-				gcp.DeployNotebookRuntimeTemplate(client, projectID, templateFile, true)
+				cc.DeployNotebookRuntimeTemplate(templateFile)
 			}
 		}
-		//gcp.CreateNotebookRuntimeTemplate(client, projectID, true)
 	},
 }
 
-var generateCmd = &cobra.Command{
-	Use:   "generate",
-	Short: "Generates a sample JSON Template",
-
-	Run: func(cmd *cobra.Command, args []string) {
-		gcp.GenerateSampleTemplate()
-	},
-}
-
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {
@@ -118,8 +103,6 @@ func init() {
 	deleteCmd.PersistentFlags().StringVarP(&displayName, "name", "n", "", "Display Name of the template")
 	deleteCmd.MarkPersistentFlagRequired("name")
 	rootCmd.AddCommand(deleteCmd)
-
-	rootCmd.AddCommand(generateCmd)
 
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 
