@@ -63,7 +63,7 @@ func getClient() (*aiplatform.NotebookClient, error) {
 
 	if path != "" {
 
-		fmt.Printf("Logging onto GCP using credentials file: %s\n", path)
+		fmt.Printf("Logging onto GCP using credentials file: %s\n ...", path)
 
 		return aiplatform.NewNotebookClient(ctx,
 			option.WithCredentialsFile(path),
@@ -71,7 +71,7 @@ func getClient() (*aiplatform.NotebookClient, error) {
 		)
 	}
 
-	fmt.Println("Logging onto GCP using ADC")
+	fmt.Println("Logging onto GCP using ADC ...")
 
 	credentials, err := google.FindDefaultCredentials(ctx, scopes)
 	if err != nil {
