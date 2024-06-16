@@ -1,10 +1,9 @@
 /*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-
+Copyright © 2024 Mark Stella <mark.stella@gammadata.io>
 */
 package main
 
-import "dcloud/cmd"
+import "github.com/mpstella/dcloud/cmd"
 
 func main() {
 	cmd.Execute()

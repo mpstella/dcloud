@@ -1,12 +1,13 @@
 package cmd
 
 import (
-	"dcloud/pkg/gcp"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/mpstella/dcloud/pkg/gcp"
 
 	"github.com/spf13/cobra"
 )

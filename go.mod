@@ -1,4 +1,4 @@
-module dcloud
+module github.com/mpstella/dcloud
 
 go 1.22
 
