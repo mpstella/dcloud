@@ -65,6 +65,7 @@ func getClient() (*aiplatform.NotebookClient, error) {
 		logrus.Fatal("Could not obtain GCP credentials", err)
 		return nil, err
 	}
+
 	return aiplatform.NewNotebookClient(ctx,
 		option.WithCredentials(credentials),
 		option.WithEndpoint(endPoint),
@@ -85,6 +86,7 @@ func (cc *CollabClient) GetNotebookRuntimeTemplate(name string) (*aiplatformpb.N
 func (c *CollabClient) GetNotebookRuntimeTemplates() map[string]RuntimeTemplate {
 
 	if c.isInitialised {
+		logrus.Debugf("Cache size %d", len(c.existingTemplates))
 		return c.existingTemplates
 	}
 
@@ -116,6 +118,9 @@ func (c *CollabClient) GetNotebookRuntimeTemplates() map[string]RuntimeTemplate 
 			MachineType: template.MachineSpec.GetMachineType(),
 		}
 	}
+
+	logrus.Debugf("Cache size %d", len(c.existingTemplates))
+	c.isInitialised = true
 	return c.existingTemplates
 }
 
@@ -157,13 +162,18 @@ func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string, perfor
 
 		logrus.Info("A template already exists with this Display Name, will check for changes ...")
 
+		if existingTemplate.Name == "" {
+			logrus.Warn("Looks like you have duplicate DisplayNames in your templates!")
+			return
+		}
+
 		if checksum == existingTemplate.FileHash {
 			logrus.Infof("Template hash matches ('%s') skipping ...", checksum)
 			return
 		} else {
 			if !performDryRun {
 				logrus.Info("Will delete existing template and redeploy")
-				c.DeleteNotebookRuntimeTemplate(existingTemplate.DisplayName)
+				c.DeleteNotebookRuntimeTemplate(existingTemplate.Name)
 			} else {
 				logrus.Info("This is a dry-run, however, the template would be deleted as the hashes do not match")
 			}
