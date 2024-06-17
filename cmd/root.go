@@ -98,7 +98,7 @@ var deployCmd = &cobra.Command{
 
 				templateFile := filepath.Join(templateDirectory, entry.Name())
 				logrus.Infof("Attempting to deploy %s\n", templateFile)
-				cc.DeployNotebookRuntimeTemplate(templateFile)
+				cc.DeployNotebookRuntimeTemplate(templateFile, dryRun)
 			}
 		}
 	},
@@ -132,7 +132,6 @@ func Execute() {
 
 func init() {
 
-	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Run the command in dry-run mode")
 	rootCmd.PersistentFlags().BoolVar(&silentMode, "silent", false, "Minimise output to stdout")
 
 	listCmd.PersistentFlags().StringVar(&projectID, "project", "", "GCP Project Name")
@@ -140,6 +139,7 @@ func init() {
 
 	deployCmd.PersistentFlags().StringVar(&projectID, "project", "", "GCP Project Name")
 	deployCmd.PersistentFlags().StringVar(&templateDirectory, "templates", "", "Directory where templates are located")
+	deployCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Run the command in dry-run mode")
 
 	deployCmd.MarkPersistentFlagRequired("project")
 	deployCmd.MarkPersistentFlagRequired("templates")

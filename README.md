@@ -25,6 +25,10 @@ Flags:
 Use "dcloud [command] --help" for more information about a command.
 ```
 
+## Credentials
+
+This application will use the magic of GCP [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) to log you in.
+
 ## Deploy a notebook runtime template
 ### help
 ```text
@@ -35,13 +39,13 @@ Usage:
   dcloud deploy [project] [pathToTemplates] [flags]
 
 Flags:
+      --dry-run            Run the command in dry-run mode
   -h, --help               help for deploy
       --project string     GCP Project Name
       --templates string   Directory where templates are located
 
 Global Flags:
-      --dry-run   Run the command in dry-run mode
-      --silent    Minimise output to stdout
+      --silent   Minimise output to stdout
 ```
 
 ### example
@@ -55,6 +59,24 @@ INFO[0001] Attempting to deploy templates/sample2.json
 INFO[0001] Retrieving existing deployed runtime templates ... 
 INFO[0002] Created Notebook Runtime Template: &{0x140000e6720} 
 INFO[0002] Closing connection to GCP ...    
+```
+
+### dry-run
+```text
+$> ./dcloud deploy --project gamma-priceline-playground --templates templates --dry-run
+INFO[0000] Attempting to deploy templates/sample.json   
+INFO[0000] Retrieving existing deployed runtime templates ... 
+INFO[0000] This is a dry-run, however, the template would be deployed 
+INFO[0000] Attempting to deploy templates/sample2.json  
+INFO[0000] Retrieving existing deployed runtime templates ... 
+INFO[0000] A template already exists with this Display Name, will check for changes ... 
+INFO[0000] This is a dry-run, however, the template would be deleted as the hashes do not match 
+INFO[0000] This is a dry-run, however, the template would be deployed 
+INFO[0000] Attempting to deploy templates/sample2_duplicate.json 
+INFO[0000] Retrieving existing deployed runtime templates ... 
+INFO[0000] A template already exists with this Display Name, will check for changes ... 
+INFO[0000] Template hash matches ('56f6d374c5d9b04304bc38a069ebbf84') skipping ... 
+INFO[0000] Closing connection to GCP ...     
 ```
 
 ### idempotent

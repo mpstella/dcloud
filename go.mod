@@ -9,6 +9,8 @@ require (
 	google.golang.org/api v0.183.0
 )
 
+require github.com/golang/mock v1.6.0 // indirect
+
 require (
 	cloud.google.com/go v0.115.0 // indirect
 	cloud.google.com/go/auth v0.5.1 // indirect

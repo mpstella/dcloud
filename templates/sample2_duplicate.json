@@ -2,7 +2,7 @@
   "display_name": "This is an another example of a runtime template",
   "description": "Deployed from sample2.json",
   "machine_spec": {
-    "machine_type": "e2-standard-2"
+    "machine_type": "e2-standard-4"
   },
   "data_persistent_disk_spec": {
     "disk_type": "pd-standard",

@@ -59,23 +59,10 @@ func NewCollabClient(projectID string) CollabClient {
 func getClient() (*aiplatform.NotebookClient, error) {
 
 	ctx := context.Background()
-	path := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-
-	if path != "" {
-
-		logrus.Infof("Logging onto GCP using credentials file: %s ...", path)
-
-		return aiplatform.NewNotebookClient(ctx,
-			option.WithCredentialsFile(path),
-			option.WithEndpoint(endPoint),
-		)
-	}
-
-	logrus.Info("Logging onto GCP using ADC ...")
 
 	credentials, err := google.FindDefaultCredentials(ctx, scopes)
 	if err != nil {
-		logrus.Info("Could not obtain ADC credentials")
+		logrus.Fatal("Could not obtain GCP credentials", err)
 		return nil, err
 	}
 	return aiplatform.NewNotebookClient(ctx,
@@ -140,7 +127,7 @@ func (c *CollabClient) Cleanup() {
 	}
 }
 
-func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string) {
+func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string, performDryRun bool) {
 
 	ctx := context.Background()
 
@@ -174,8 +161,12 @@ func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string) {
 			logrus.Infof("Template hash matches ('%s') skipping ...\n", checksum)
 			return
 		} else {
-			logrus.Info("Will delete existing template and redeploy")
-			c.DeleteNotebookRuntimeTemplate(existingTemplate.DisplayName)
+			if !performDryRun {
+				logrus.Info("Will delete existing template and redeploy")
+				c.DeleteNotebookRuntimeTemplate(existingTemplate.DisplayName)
+			} else {
+				logrus.Info("This is a dry-run, however, the template would be deleted as the hashes do not match")
+			}
 		}
 	}
 
@@ -194,9 +185,14 @@ func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string) {
 		NotebookRuntimeTemplate: &config,
 	}
 
-	resp, err := c.client.CreateNotebookRuntimeTemplate(ctx, req)
-	if err != nil {
-		logrus.Fatalf("Failed to create Notebook Runtime Template: %v", err)
+	if !performDryRun {
+		resp, err := c.client.CreateNotebookRuntimeTemplate(ctx, req)
+		if err != nil {
+			logrus.Fatalf("Failed to create Notebook Runtime Template: %v", err)
+		}
+		logrus.Infof("Created Notebook Runtime Template: %v\n", resp)
+	} else {
+		logrus.Info("This is a dry-run, however, the template would be deployed")
 	}
 
 	// add to cache to ensure uniqueness
@@ -204,8 +200,6 @@ func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string) {
 		DisplayName: config.DisplayName,
 		FileHash:    checksum,
 	}
-
-	logrus.Infof("Created Notebook Runtime Template: %v\n", resp)
 }
 
 func (c *CollabClient) DeleteNotebookRuntimeTemplate(name string) {
@@ -221,5 +215,4 @@ func (c *CollabClient) DeleteNotebookRuntimeTemplate(name string) {
 		logrus.Fatalf("Failed to delete Notebook Runtime Template: %v", err)
 	}
 	logrus.Infof("Deleted Notebook Runtime Template %+v", resp)
-
 }
