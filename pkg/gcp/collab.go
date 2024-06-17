@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 
+	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -23,7 +23,7 @@ const scopes = "https://www.googleapis.com/auth/cloud-platform"
 
 type RuntimeTemplate struct {
 	Name        string `json:"Name"`
-	DisplayName string `json:"DisplayName`
+	DisplayName string `json:"DisplayName"`
 	Description string `json:"Description"`
 	FileHash    string `json:"FileHash"`
 	MachineType string `json:"MachineType"`
@@ -45,7 +45,7 @@ func NewCollabClient(projectID string) CollabClient {
 	client, err := getClient()
 
 	if err != nil {
-		log.Fatal("Could not create Client", err)
+		logrus.Fatal("Could not create Client", err)
 	}
 
 	return CollabClient{
@@ -63,7 +63,7 @@ func getClient() (*aiplatform.NotebookClient, error) {
 
 	if path != "" {
 
-		fmt.Printf("Logging onto GCP using credentials file: %s\n ...", path)
+		logrus.Infof("Logging onto GCP using credentials file: %s ...", path)
 
 		return aiplatform.NewNotebookClient(ctx,
 			option.WithCredentialsFile(path),
@@ -71,11 +71,11 @@ func getClient() (*aiplatform.NotebookClient, error) {
 		)
 	}
 
-	fmt.Println("Logging onto GCP using ADC ...")
+	logrus.Info("Logging onto GCP using ADC ...")
 
 	credentials, err := google.FindDefaultCredentials(ctx, scopes)
 	if err != nil {
-		fmt.Println("Could not obtain ADC credentials")
+		logrus.Info("Could not obtain ADC credentials")
 		return nil, err
 	}
 	return aiplatform.NewNotebookClient(ctx,
@@ -84,13 +84,24 @@ func getClient() (*aiplatform.NotebookClient, error) {
 	)
 }
 
+func (cc *CollabClient) GetNotebookRuntimeTemplate(name string) (*aiplatformpb.NotebookRuntimeTemplate, error) {
+
+	ctx := context.Background()
+
+	req := &aiplatformpb.GetNotebookRuntimeTemplateRequest{
+		Name: name,
+	}
+
+	return cc.client.GetNotebookRuntimeTemplate(ctx, req)
+}
+
 func (c *CollabClient) GetNotebookRuntimeTemplates() map[string]RuntimeTemplate {
 
 	if c.isInitialised {
 		return c.existingTemplates
 	}
 
-	fmt.Println("Retrieving existing deployed runtime templates ...")
+	logrus.Info("Retrieving existing deployed runtime templates ...")
 
 	ctx := context.Background()
 
@@ -107,7 +118,7 @@ func (c *CollabClient) GetNotebookRuntimeTemplates() map[string]RuntimeTemplate 
 			break
 		}
 		if err != nil {
-			log.Fatalf("Failed to list Notebook Runtime Templates: %v", err)
+			logrus.Fatalf("Failed to list Notebook Runtime Templates: %v", err)
 		}
 
 		c.existingTemplates[template.GetDisplayName()] = RuntimeTemplate{
@@ -118,25 +129,13 @@ func (c *CollabClient) GetNotebookRuntimeTemplates() map[string]RuntimeTemplate 
 			MachineType: template.MachineSpec.GetMachineType(),
 		}
 	}
-
-	countOfExisting := len(c.existingTemplates)
-
-	switch countOfExisting {
-	case 0:
-		fmt.Println("Could not find any existing runtime templates")
-	case 1:
-		fmt.Println("Found an existing runtime template")
-	default:
-		fmt.Printf("Found %d existing runtime templates\n", countOfExisting)
-	}
-
 	return c.existingTemplates
 }
 
 func (c *CollabClient) Cleanup() {
 
 	if c.client != nil {
-		fmt.Println("Closing connection to GCP ...")
+		logrus.Info("Closing connection to GCP ...")
 		c.client.Close()
 	}
 }
@@ -148,34 +147,34 @@ func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string) {
 	data, err := os.ReadFile(templateFile)
 
 	if err != nil {
-		log.Fatalf("Error reading file %v\n", err)
+		logrus.Fatalf("Error reading file %v\n", err)
 	}
 
 	var config aiplatformpb.NotebookRuntimeTemplate
 	err = json.Unmarshal(data, &config)
 
 	if err != nil {
-		log.Fatalf("Error parsing JSON file: %v", err)
+		logrus.Fatalf("Error parsing JSON file: %v", err)
 	}
 
 	hash := md5.New()
 
 	_, err = hash.Write(data)
 	if err != nil {
-		log.Fatalf("Failed to write data to hash: %v", err)
+		logrus.Fatalf("Failed to write data to hash: %v", err)
 	}
 
 	checksum := hex.EncodeToString(hash.Sum(nil))
 
 	if existingTemplate, ok := c.GetNotebookRuntimeTemplates()[config.DisplayName]; ok {
 
-		fmt.Printf("A template already exists with this Display Name, skipping ...\n")
+		logrus.Info("A template already exists with this Display Name, will check for changes ...")
 
 		if checksum == existingTemplate.FileHash {
-			fmt.Printf("Template hash matches ('%s')  skipping ...\n", checksum)
+			logrus.Infof("Template hash matches ('%s') skipping ...\n", checksum)
 			return
 		} else {
-			fmt.Println("Will delete existing template and redeploy")
+			logrus.Info("Will delete existing template and redeploy")
 			c.DeleteNotebookRuntimeTemplate(existingTemplate.DisplayName)
 		}
 	}
@@ -197,7 +196,7 @@ func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string) {
 
 	resp, err := c.client.CreateNotebookRuntimeTemplate(ctx, req)
 	if err != nil {
-		log.Fatalf("Failed to create Notebook Runtime Template: %v", err)
+		logrus.Fatalf("Failed to create Notebook Runtime Template: %v", err)
 	}
 
 	// add to cache to ensure uniqueness
@@ -206,25 +205,21 @@ func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string) {
 		FileHash:    checksum,
 	}
 
-	fmt.Printf("Created Notebook Runtime Template: %v\n", resp)
+	logrus.Infof("Created Notebook Runtime Template: %v\n", resp)
 }
 
-func (c *CollabClient) DeleteNotebookRuntimeTemplate(displayName string) {
+func (c *CollabClient) DeleteNotebookRuntimeTemplate(name string) {
 
 	ctx := context.Background()
 
-	if template, ok := c.GetNotebookRuntimeTemplates()[displayName]; ok {
-
-		fmt.Printf("Found template: %s\n", template.Name)
-
-		req := &aiplatformpb.DeleteNotebookRuntimeTemplateRequest{
-			Name: template.Name,
-		}
-
-		resp, err := c.client.DeleteNotebookRuntimeTemplate(ctx, req)
-		if err != nil {
-			log.Fatalf("Failed to delete Notebook Runtime Template: %v", err)
-		}
-		fmt.Printf("Deleted Notebook Runtime Template %v\n\n", resp)
+	req := &aiplatformpb.DeleteNotebookRuntimeTemplateRequest{
+		Name: name,
 	}
+
+	resp, err := c.client.DeleteNotebookRuntimeTemplate(ctx, req)
+	if err != nil {
+		logrus.Fatalf("Failed to delete Notebook Runtime Template: %v", err)
+	}
+	logrus.Infof("Deleted Notebook Runtime Template %+v", resp)
+
 }

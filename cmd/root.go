@@ -3,23 +3,49 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/mpstella/dcloud/pkg/gcp"
+	"github.com/sirupsen/logrus"
 
 	"github.com/spf13/cobra"
 )
 
-var projectID string
-var displayName string
-var templateDirectory string
+var (
+	projectID         string
+	templateName      string
+	templateDirectory string
+	dryRun            bool
+	silentMode        bool
+)
+
+func initConfig() {
+	if silentMode {
+		logrus.SetLevel(logrus.WarnLevel)
+	} else {
+		logrus.SetLevel(logrus.InfoLevel)
+	}
+}
+
+func prettyPrinter(arg interface{}) {
+
+	prettyString, _ := json.MarshalIndent(arg, "", "  ")
+
+	if silentMode {
+		fmt.Println(string(prettyString))
+	} else {
+		logrus.Infof("%s\n", string(prettyString))
+	}
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "dcloud",
 	Short: "DAW gcloud makeshift utility",
 	Long:  `Given we are waiting on Google this is our dodgy gcloud helper`,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		initConfig()
+	},
 }
 
 var listCmd = &cobra.Command{
@@ -34,31 +60,26 @@ var listCmd = &cobra.Command{
 		existingTemplates := cc.GetNotebookRuntimeTemplates()
 
 		for _, template := range existingTemplates {
-			prettyString, err := json.MarshalIndent(template, "", "  ")
-			if err != nil {
-				fmt.Printf("%s\n", template)
-			} else {
-				fmt.Printf("%s\n", string(prettyString))
-			}
+			prettyPrinter(template)
 		}
 	},
 }
 
 var deleteCmd = &cobra.Command{
-	Use:   "delete [project] [name]",
-	Short: "Delete an existing NotebookRuntimeTemplate by DisplayName",
+	Use:   "delete [name]",
+	Short: "Delete an existing NotebookRuntimeTemplate",
 
 	Run: func(cmd *cobra.Command, args []string) {
 
 		cc := gcp.NewCollabClient(projectID)
 		defer cc.Cleanup()
 
-		cc.DeleteNotebookRuntimeTemplate(displayName)
+		cc.DeleteNotebookRuntimeTemplate(templateName)
 	},
 }
 
 var deployCmd = &cobra.Command{
-	Use:   "deploy [project]",
+	Use:   "deploy [project] [pathToTemplates]",
 	Short: "Deploy NotebookRuntimeTemplates",
 
 	Run: func(cmd *cobra.Command, args []string) {
@@ -66,7 +87,7 @@ var deployCmd = &cobra.Command{
 		templates, err := os.ReadDir(templateDirectory)
 
 		if err != nil {
-			log.Fatalf("Error occurred reading directory %v\n", err)
+			logrus.Fatalf("Error occurred reading directory %v\n", err)
 		}
 
 		cc := gcp.NewCollabClient(projectID)
@@ -76,10 +97,29 @@ var deployCmd = &cobra.Command{
 			if !entry.IsDir() {
 
 				templateFile := filepath.Join(templateDirectory, entry.Name())
-				fmt.Printf("Attempting to deploy %s\n", templateFile)
+				logrus.Infof("Attempting to deploy %s\n", templateFile)
 				cc.DeployNotebookRuntimeTemplate(templateFile)
 			}
 		}
+	},
+}
+
+var exportCmd = &cobra.Command{
+	Use:   "export [name]",
+	Short: "Export an existing NotebookRutimeTemplate",
+
+	Run: func(cmd *cobra.Command, args []string) {
+
+		cc := gcp.NewCollabClient(projectID)
+		defer cc.Cleanup()
+
+		template, err := cc.GetNotebookRuntimeTemplate(templateName)
+
+		if err != nil {
+			logrus.Fatal("Failed to retrieve RuntimeTemplate", err)
+		}
+
+		prettyPrinter(template)
 	},
 }
 
@@ -92,19 +132,26 @@ func Execute() {
 
 func init() {
 
-	rootCmd.PersistentFlags().StringVarP(&projectID, "project", "p", "", "GCP Project Name")
-	rootCmd.MarkPersistentFlagRequired("project")
+	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Run the command in dry-run mode")
+	rootCmd.PersistentFlags().BoolVar(&silentMode, "silent", false, "Minimise output to stdout")
 
-	rootCmd.AddCommand(listCmd)
+	listCmd.PersistentFlags().StringVar(&projectID, "project", "", "GCP Project Name")
+	listCmd.MarkPersistentFlagRequired("project")
 
-	deployCmd.PersistentFlags().StringVarP(&templateDirectory, "templates", "t", "", "Directory where templates are located")
+	deployCmd.PersistentFlags().StringVar(&projectID, "project", "", "GCP Project Name")
+	deployCmd.PersistentFlags().StringVar(&templateDirectory, "templates", "", "Directory where templates are located")
+
+	deployCmd.MarkPersistentFlagRequired("project")
 	deployCmd.MarkPersistentFlagRequired("templates")
-	rootCmd.AddCommand(deployCmd)
 
-	deleteCmd.PersistentFlags().StringVarP(&displayName, "name", "n", "", "Display Name of the template")
+	deleteCmd.PersistentFlags().StringVar(&templateName, "name", "", "Name of the template")
 	deleteCmd.MarkPersistentFlagRequired("name")
-	rootCmd.AddCommand(deleteCmd)
+
+	exportCmd.PersistentFlags().StringVar(&templateName, "name", "", "Name of the template")
+	exportCmd.MarkPersistentFlagRequired("name")
 
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 
+	// add all the commands here
+	rootCmd.AddCommand(deployCmd, listCmd, deleteCmd, exportCmd)
 }
