@@ -1,13 +1,17 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/mpstella/dcloud/pkg/gcp"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc/grpclog"
 
 	"github.com/spf13/cobra"
 )
@@ -18,11 +22,33 @@ var (
 	templateDirectory string
 	dryRun            bool
 	silentMode        bool
+	debugMode         bool
 )
 
+type CustomFormatter struct{}
+
+func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
+	// Format the time
+	timestamp := time.Now().Format("2006/01/02 15:04:05")
+
+	// Create a buffer to write the formatted log entry
+	var b bytes.Buffer
+
+	// Write the formatted log entry
+	b.WriteString(fmt.Sprintf("%s %s: [%s] %s\n", timestamp, strings.ToUpper(entry.Level.String()), "collab", entry.Message))
+
+	return b.Bytes(), nil
+}
+
 func initConfig() {
+
+	logrus.SetFormatter(&CustomFormatter{})
+
 	if silentMode {
 		logrus.SetLevel(logrus.WarnLevel)
+	} else if debugMode {
+		logrus.SetLevel(logrus.DebugLevel)
+		grpclog.SetLoggerV2(grpclog.NewLoggerV2WithVerbosity(os.Stdout, os.Stderr, os.Stderr, 99))
 	} else {
 		logrus.SetLevel(logrus.InfoLevel)
 	}
@@ -35,7 +61,7 @@ func prettyPrinter(arg interface{}) {
 	if silentMode {
 		fmt.Println(string(prettyString))
 	} else {
-		logrus.Infof("%s\n", string(prettyString))
+		logrus.Infof("%s", string(prettyString))
 	}
 }
 
@@ -87,7 +113,7 @@ var deployCmd = &cobra.Command{
 		templates, err := os.ReadDir(templateDirectory)
 
 		if err != nil {
-			logrus.Fatalf("Error occurred reading directory %v\n", err)
+			logrus.Fatalf("Error occurred reading directory %v", err)
 		}
 
 		cc := gcp.NewCollabClient(projectID)
@@ -97,7 +123,7 @@ var deployCmd = &cobra.Command{
 			if !entry.IsDir() {
 
 				templateFile := filepath.Join(templateDirectory, entry.Name())
-				logrus.Infof("Attempting to deploy %s\n", templateFile)
+				logrus.Infof("Attempting to deploy %s", templateFile)
 				cc.DeployNotebookRuntimeTemplate(templateFile, dryRun)
 			}
 		}
@@ -133,6 +159,7 @@ func Execute() {
 func init() {
 
 	rootCmd.PersistentFlags().BoolVar(&silentMode, "silent", false, "Minimise output to stdout")
+	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debugging of application")
 
 	listCmd.PersistentFlags().StringVar(&projectID, "project", "", "GCP Project Name")
 	listCmd.MarkPersistentFlagRequired("project")

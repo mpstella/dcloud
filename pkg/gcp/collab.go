@@ -134,7 +134,7 @@ func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string, perfor
 	data, err := os.ReadFile(templateFile)
 
 	if err != nil {
-		logrus.Fatalf("Error reading file %v\n", err)
+		logrus.Fatalf("Error reading file %v", err)
 	}
 
 	var config aiplatformpb.NotebookRuntimeTemplate
@@ -158,7 +158,7 @@ func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string, perfor
 		logrus.Info("A template already exists with this Display Name, will check for changes ...")
 
 		if checksum == existingTemplate.FileHash {
-			logrus.Infof("Template hash matches ('%s') skipping ...\n", checksum)
+			logrus.Infof("Template hash matches ('%s') skipping ...", checksum)
 			return
 		} else {
 			if !performDryRun {
@@ -190,7 +190,7 @@ func (c *CollabClient) DeployNotebookRuntimeTemplate(templateFile string, perfor
 		if err != nil {
 			logrus.Fatalf("Failed to create Notebook Runtime Template: %v", err)
 		}
-		logrus.Infof("Created Notebook Runtime Template: %v\n", resp)
+		logrus.Infof("Created Notebook Runtime Template: %v", resp)
 	} else {
 		logrus.Info("This is a dry-run, however, the template would be deployed")
 	}
