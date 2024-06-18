@@ -1,0 +1,11 @@
+displayName: "This is an example of a runtime template [sample2.yaml]"
+description: "Deployed from sample2.yaml"
+machineSpec:
+  machineType: "e2-standard-4"
+dataPersistentDiskSpec:
+  diskType: "pd-standard"
+  diskSizeGb: "10"
+networkSpec:
+  enableInternetAccess: true
+idleShutdownConfig:
+  idleTimeout: "600s"
