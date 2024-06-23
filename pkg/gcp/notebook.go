@@ -77,13 +77,13 @@ func (nc *NotebookClient) curl(method string, url string, payload io.Reader) []b
 	return body
 }
 
-func (nc *NotebookClient) GetNotebookRuntimeTemplates() ListNotebookRuntimeTemplatesResult {
+func (nc *NotebookClient) GetNotebookRuntimeTemplates() *ListNotebookRuntimeTemplatesResult {
 
 	body := nc.curl("GET", nc.url, nil)
 
 	var templates ListNotebookRuntimeTemplatesResult
 	json.Unmarshal(body, &templates)
-	return templates
+	return &templates
 }
 
 func (nc *NotebookClient) DeleteNotebookRuntimeTemplate(name string) {

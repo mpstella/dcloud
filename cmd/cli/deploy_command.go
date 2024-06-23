@@ -56,16 +56,21 @@ var deployCmd = &cobra.Command{
 					continue
 				}
 
+				if val, ok := os.LookupEnv("GIT_SHA"); ok {
+					template.AddLabel("git_sha", val)
+				}
+
+				if val, ok := os.LookupEnv("GITHUB_RUN_ID"); ok {
+					template.AddLabel("git_run_id", val)
+				}
+
+				logrus.Infof("Attempting to deploy %s", templateFile)
+				nc.DeployNotebookRuntimeTemplate(template)
+
 				if existing != nil {
 					logrus.Infof("Found existing template (%s) with same DisplayName and a different md5 hash, will delete existing one ..", *existing.DisplayName)
 					nc.DeleteNotebookRuntimeTemplate(*existing.Name)
 				}
-
-				template.AddLabel("git_sha", os.Getenv("GITHUB_SHA"))
-				template.AddLabel("git_run_id", os.Getenv("GITHUB_RUN_ID"))
-
-				logrus.Infof("Attempting to deploy %s", templateFile)
-				nc.DeployNotebookRuntimeTemplate(template)
 			}
 		}
 	},

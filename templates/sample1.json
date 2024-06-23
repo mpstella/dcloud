@@ -15,6 +15,7 @@
     "idleTimeout": "600s"
   },
   "labels": {
-    "source": "sample"
+    "source": "sample1",
+    "env": "dev2"
   }
 }

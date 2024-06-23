@@ -53,21 +53,13 @@ func NewNotebookRuntimeTemplateFromFile(path string) *NotebookRuntimeTemplate {
 	return &template
 }
 
-func (t *NotebookRuntimeTemplate) AddLabel(name string, value string) {
+func (t *NotebookRuntimeTemplate) AddLabel(key string, value string) {
+
 	if t.Labels == nil {
 		labels := make(map[string]string)
 		t.Labels = &labels
 	}
-	(*t.Labels)[name] = value
-}
-
-func (t *NotebookRuntimeTemplate) AddLabels(labels map[string]string) {
-	if t.Labels != nil {
-		for key, value := range *t.Labels {
-			labels[key] = value
-		}
-	}
-	t.Labels = &labels
+	(*t.Labels)[key] = value
 }
 
 func (t *NotebookRuntimeTemplate) ComparesTo(c *NotebookRuntimeTemplate) TemplateComparison {
