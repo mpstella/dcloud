@@ -3,11 +3,14 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/mpstella/dcloud/pkg/gcp"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
+
+var deploymentTimestampUTC string
 
 func resolve(nc *gcp.NotebookClient, template *gcp.NotebookRuntimeTemplate) (gcp.TemplateComparison, *gcp.NotebookRuntimeTemplate) {
 
@@ -56,6 +59,9 @@ var deployCmd = &cobra.Command{
 					continue
 				}
 
+				// add a bunch of labels to the resource so we can track deployments
+				template.AddLabel("deployment_ts_utc", deploymentTimestampUTC)
+
 				if val, ok := os.LookupEnv("GIT_SHA"); ok {
 					template.AddLabel("git_sha", val)
 				}
@@ -64,9 +70,11 @@ var deployCmd = &cobra.Command{
 					template.AddLabel("git_run_id", val)
 				}
 
+				// deploy first as this does not impact any existing templates
 				logrus.Infof("Attempting to deploy %s", templateFile)
 				nc.DeployNotebookRuntimeTemplate(template)
 
+				// now delete the duplicate
 				if existing != nil {
 					logrus.Infof("Found existing template (%s) with same DisplayName and a different md5 hash, will delete existing one ..", *existing.DisplayName)
 					nc.DeleteNotebookRuntimeTemplate(*existing.Name)
@@ -77,6 +85,9 @@ var deployCmd = &cobra.Command{
 }
 
 func init() {
+
+	now := time.Now().UTC()
+	deploymentTimestampUTC = now.Format("20060102_150405")
 
 	deployCmd.PersistentFlags().StringVar(&projectID, "project", "", "GCP Project Name")
 	deployCmd.PersistentFlags().StringVar(&templateDirectory, "templates", "", "Directory where templates are located")

@@ -72,7 +72,7 @@ func (t *NotebookRuntimeTemplate) ComparesTo(c *NotebookRuntimeTemplate) Templat
 			return Different
 		}
 
-		// check if a 'md5' k,v exists in the deployed template's labels
+		// check if a 'md5' key exists in the deployed template's labels
 		if _, exists := (*c.Labels)["md5"]; exists {
 
 			if (*t.Labels)["md5"] == (*c.Labels)["md5"] {
