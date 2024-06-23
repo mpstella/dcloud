@@ -1,71 +1,28 @@
 package cmd
 
 import (
-	"crypto/md5"
-	"encoding/hex"
-	"encoding/json"
 	"os"
 	"path/filepath"
 
 	"github.com/mpstella/dcloud/pkg/gcp"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v2"
 )
 
-const (
-	doesNotExist = iota
-	existsAndIsIdentical
-	existsButIsDifferent
-)
+func resolve(nc *gcp.NotebookClient, template *gcp.NotebookRuntimeTemplate) (gcp.TemplateComparison, *gcp.NotebookRuntimeTemplate) {
 
-type templateComparison int
-
-func resolve(nc *gcp.NotebookClient, template gcp.NotebookRuntimeTemplate, checksum string) (templateComparison, *gcp.NotebookRuntimeTemplate) {
-
+	// retrieving each time in case another template is deployed in the interim.
 	templates := nc.GetNotebookRuntimeTemplates()
 
 	for _, existing := range templates.NotebookRuntimeTemplates {
 
-		if *existing.DisplayName == *template.DisplayName {
-			if (*existing.Labels)["md5"] == checksum {
-				return existsAndIsIdentical, &existing
-			}
-			return existsButIsDifferent, &existing
+		result := template.ComparesTo(&existing)
+
+		if result != gcp.DoesNotMatch {
+			return result, &existing
 		}
 	}
-	return doesNotExist, nil
-}
-
-func readTemplateFile(path string) (gcp.NotebookRuntimeTemplate, string) {
-
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		logrus.Fatal("Could not read file", err)
-	}
-
-	hash := md5.New()
-
-	hash.Write(bytes)
-	checksum := hex.EncodeToString(hash.Sum(nil))
-
-	var template gcp.NotebookRuntimeTemplate
-
-	ext := filepath.Ext(path)
-
-	switch ext {
-	case ".yaml", ".yml":
-		if err := yaml.Unmarshal(bytes, &template); err != nil {
-			logrus.Fatal("Could not unmarshall JSON file", err)
-		}
-	case ".json":
-		if err := json.Unmarshal(bytes, &template); err != nil {
-			logrus.Fatal("Could not unmarshall JSON file", err)
-		}
-	default:
-		logrus.Fatalf("Unsupported file extension '%s'", ext)
-	}
-	return template, checksum
+	return gcp.DoesNotMatch, nil
 }
 
 var deployCmd = &cobra.Command{
@@ -90,34 +47,25 @@ var deployCmd = &cobra.Command{
 
 				logrus.Infof("Parsing template %s", templateFile)
 
-				template, checksum := readTemplateFile(templateFile)
-				resolveAction, existing := resolve(&nc, template, checksum)
+				template := gcp.NewNotebookRuntimeTemplateFromFile(templateFile)
 
-				if resolveAction == existsAndIsIdentical {
-					logrus.Infof("Found existing template (%s) with same DisplayName and md5 hash, skipping ..", *existing.DisplayName)
+				cmp, existing := resolve(&nc, template)
+
+				if cmp == gcp.Identical {
+					logrus.Infof("Found existing template (%s) with same DisplayName and a md5 hash, skipping ..", *existing.DisplayName)
 					continue
 				}
 
-				if resolveAction == existsButIsDifferent {
+				if existing != nil {
 					logrus.Infof("Found existing template (%s) with same DisplayName and a different md5 hash, will delete existing one ..", *existing.DisplayName)
 					nc.DeleteNotebookRuntimeTemplate(*existing.Name)
 				}
 
-				labels := map[string]string{
-					"md5":        checksum,
-					"git_sh":     os.Getenv("GITHUB_SHA"),
-					"git_run_id": os.Getenv("GITHUB_RUN_ID"),
-				}
-
-				if template.Labels != nil {
-					for key, value := range *template.Labels {
-						labels[key] = value
-					}
-				}
-				template.Labels = &labels
+				template.AddLabel("git_sha", os.Getenv("GITHUB_SHA"))
+				template.AddLabel("git_run_id", os.Getenv("GITHUB_RUN_ID"))
 
 				logrus.Infof("Attempting to deploy %s", templateFile)
-				nc.DeployNotebookRuntimeTemplate(&template)
+				nc.DeployNotebookRuntimeTemplate(template)
 			}
 		}
 	},
