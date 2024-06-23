@@ -3,19 +3,14 @@ package gcp
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"path/filepath"
 
 	"net/http"
-	"os"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2/google"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -28,14 +23,6 @@ type NotebookClient struct {
 	url   string
 	token string
 }
-
-type TemplateComparison int
-
-const (
-	DoesNotExist = iota
-	ExistsAndIsIdentical
-	ExistsButIsDifferent
-)
 
 func NewNotebookClient(projectID string) NotebookClient {
 
@@ -90,22 +77,6 @@ func (nc *NotebookClient) curl(method string, url string, payload io.Reader) []b
 	return body
 }
 
-func (nc *NotebookClient) resolve(template NotebookRuntimeTemplate, checksum string) (TemplateComparison, *NotebookRuntimeTemplate) {
-
-	templates := nc.GetNotebookRuntimeTemplates()
-
-	for _, existing := range templates.NotebookRuntimeTemplates {
-
-		if *existing.DisplayName == *template.DisplayName {
-			if (*existing.Labels)["md5"] == checksum {
-				return ExistsAndIsIdentical, &existing
-			}
-			return ExistsButIsDifferent, &existing
-		}
-	}
-	return DoesNotExist, nil
-}
-
 func (nc *NotebookClient) GetNotebookRuntimeTemplates() ListNotebookRuntimeTemplatesResult {
 
 	body := nc.curl("GET", nc.url, nil)
@@ -122,34 +93,7 @@ func (nc *NotebookClient) DeleteNotebookRuntimeTemplate(name string) {
 	nc.curl("DELETE", url, nil)
 }
 
-func (nc *NotebookClient) DeployNotebookRuntimeTemplateFromFile(path string) {
-
-	template, checksum := readTemplateFile(path)
-
-	resolveAction, existing := nc.resolve(template, checksum)
-
-	if resolveAction == ExistsAndIsIdentical {
-		logrus.Infof("Found existing template (%s) with same DisplayName and md5 hash, skipping ..", *existing.DisplayName)
-		return
-	}
-
-	if resolveAction == ExistsButIsDifferent {
-		logrus.Infof("Found existing template (%s) with same DisplayName and a different md5 hash, will delete existing one ..", *existing.DisplayName)
-		nc.DeleteNotebookRuntimeTemplate(*existing.Name)
-	}
-
-	labels := map[string]string{
-		"md5":        checksum,
-		"git_sh":     os.Getenv("GITHUB_SHA"),
-		"git_run_id": os.Getenv("GITHUB_RUN_ID"),
-	}
-
-	if template.Labels != nil {
-		for key, value := range *template.Labels {
-			labels[key] = value
-		}
-	}
-	template.Labels = &labels
+func (nc *NotebookClient) DeployNotebookRuntimeTemplate(template *NotebookRuntimeTemplate) {
 
 	payload, err := json.Marshal(template)
 
@@ -158,35 +102,4 @@ func (nc *NotebookClient) DeployNotebookRuntimeTemplateFromFile(path string) {
 	}
 
 	nc.curl("POST", nc.url, bytes.NewBuffer(payload))
-}
-
-func readTemplateFile(path string) (NotebookRuntimeTemplate, string) {
-
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		logrus.Fatal("Could not read file", err)
-	}
-
-	hash := md5.New()
-
-	hash.Write(bytes)
-	checksum := hex.EncodeToString(hash.Sum(nil))
-
-	var template NotebookRuntimeTemplate
-
-	ext := filepath.Ext(path)
-
-	switch ext {
-	case ".yaml", ".yml":
-		if err := yaml.Unmarshal(bytes, &template); err != nil {
-			logrus.Fatal("Could not unmarshall JSON file", err)
-		}
-	case ".json":
-		if err := json.Unmarshal(bytes, &template); err != nil {
-			logrus.Fatal("Could not unmarshall JSON file", err)
-		}
-	default:
-		logrus.Fatalf("Unsupported file extension '%s'", ext)
-	}
-	return template, checksum
 }
