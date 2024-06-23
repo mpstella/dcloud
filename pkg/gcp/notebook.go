@@ -57,7 +57,7 @@ func NewNotebookClient(projectID string) NotebookClient {
 	}
 }
 
-func (nc *NotebookClient) curl(method string, url string, payload io.Reader) (string, []byte) {
+func (nc *NotebookClient) curl(method string, url string, payload io.Reader) []byte {
 
 	req, err := http.NewRequest(method, url, payload)
 
@@ -76,20 +76,18 @@ func (nc *NotebookClient) curl(method string, url string, payload io.Reader) (st
 	}
 	defer resp.Body.Close()
 
-	// Read and print the response
 	body, err := io.ReadAll(resp.Body)
 
 	if err != nil {
 		logrus.Fatalf("Failed to read response body: %v", err)
 	}
 
-	logrus.Debugf("Response status: %s", resp.Status)
-
-	if resp.Status != "200 OK" {
-		logrus.Error(string(body))
+	if resp.StatusCode != 200 {
+		logrus.Fatalf("Status returned: %d (%s)", resp.StatusCode, string(body))
 	}
 
-	return resp.Status, body
+	logrus.Debugf("Response status: %s", resp.Status)
+	return body
 }
 
 func (nc *NotebookClient) resolve(template NotebookRuntimeTemplate, checksum string) (TemplateComparison, *NotebookRuntimeTemplate) {
@@ -110,15 +108,10 @@ func (nc *NotebookClient) resolve(template NotebookRuntimeTemplate, checksum str
 
 func (nc *NotebookClient) GetNotebookRuntimeTemplates() ListNotebookRuntimeTemplatesResult {
 
-	status, body := nc.curl("GET", nc.url, nil)
+	body := nc.curl("GET", nc.url, nil)
 
-	if status != "200 OK" {
-		logrus.Fatalf("Status returned: %s (%s)", status, string(body))
-	}
 	var templates ListNotebookRuntimeTemplatesResult
-
 	json.Unmarshal(body, &templates)
-
 	return templates
 }
 
