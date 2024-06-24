@@ -24,32 +24,41 @@ type NotebookClient struct {
 	token string
 }
 
-func NewNotebookClient(projectID string) NotebookClient {
+type ResponseError struct {
+	Code    int
+	Message string
+}
+
+func (e *ResponseError) Error() string {
+	return fmt.Sprintf("Error response status (%d): %s", e.Code, e.Message)
+}
+
+func NewNotebookClient(projectID string) (*NotebookClient, error) {
 
 	ctx := context.Background()
 
 	creds, err := google.FindDefaultCredentials(ctx, scopes)
 	if err != nil {
-		logrus.Fatalf("Failed to obtain default credentials: %v", err)
+		return nil, err
 	}
 
 	token, err := creds.TokenSource.Token()
 	if err != nil {
-		logrus.Fatalf("Failed to get token: %v", err)
+		return nil, err
 	}
 
-	return NotebookClient{
+	return &NotebookClient{
 		url:   fmt.Sprintf("%s/projects/%s/locations/%s/notebookRuntimeTemplates", serviceEndpoint, projectID, location),
 		token: token.AccessToken,
-	}
+	}, nil
 }
 
-func (nc *NotebookClient) curl(method string, url string, payload io.Reader) []byte {
+func (nc *NotebookClient) curl(method string, url string, payload io.Reader) ([]byte, error) {
 
 	req, err := http.NewRequest(method, url, payload)
 
 	if err != nil {
-		logrus.Fatalf("Failed to create request: %v", err)
+		return nil, err
 	}
 
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", nc.token))
@@ -59,47 +68,57 @@ func (nc *NotebookClient) curl(method string, url string, payload io.Reader) []b
 	resp, err := client.Do(req)
 
 	if err != nil {
-		logrus.Fatalf("Failed to perform request: %v", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 
 	if err != nil {
-		logrus.Fatalf("Failed to read response body: %v", err)
+		return nil, err
 	}
 
 	if resp.StatusCode != 200 {
-		logrus.Fatalf("Status returned: %d (%s)", resp.StatusCode, string(body))
+		return nil, &ResponseError{Code: resp.StatusCode, Message: string(body)}
 	}
 
-	logrus.Debugf("Response status: %s", resp.Status)
-	return body
+	return body, nil
 }
 
-func (nc *NotebookClient) GetNotebookRuntimeTemplates() *ListNotebookRuntimeTemplatesResult {
+func (nc *NotebookClient) GetNotebookRuntimeTemplates() (*ListNotebookRuntimeTemplatesResult, error) {
 
-	body := nc.curl("GET", nc.url, nil)
+	body, err := nc.curl("GET", nc.url, nil)
+
+	if err != nil {
+		return nil, err
+	}
 
 	var templates ListNotebookRuntimeTemplatesResult
-	json.Unmarshal(body, &templates)
-	return &templates
+	err = json.Unmarshal(body, &templates)
+
+	if err != nil {
+		return nil, err
+	}
+	return &templates, nil
 }
 
-func (nc *NotebookClient) DeleteNotebookRuntimeTemplate(name string) {
+func (nc *NotebookClient) DeleteNotebookRuntimeTemplate(name string) error {
 
 	url := fmt.Sprintf("%s/%s", serviceEndpoint, name)
 	logrus.Infof("Deleting: %s", url)
-	nc.curl("DELETE", url, nil)
+
+	_, err := nc.curl("DELETE", url, nil)
+
+	return err
 }
 
-func (nc *NotebookClient) DeployNotebookRuntimeTemplate(template *NotebookRuntimeTemplate) {
+func (nc *NotebookClient) DeployNotebookRuntimeTemplate(template *NotebookRuntimeTemplate) error {
 
 	payload, err := json.Marshal(template)
 
 	if err != nil {
-		logrus.Fatal("Error creating JSON Payload", err)
+		return err
 	}
-
-	nc.curl("POST", nc.url, bytes.NewBuffer(payload))
+	_, err = nc.curl("POST", nc.url, bytes.NewBuffer(payload))
+	return err
 }

@@ -33,9 +33,17 @@ var listCmd = &cobra.Command{
 
 	Run: func(cmd *cobra.Command, args []string) {
 
-		nc := gcp.NewNotebookClient(projectID)
+		nc, err := gcp.NewNotebookClient(projectID)
 
-		existingTemplates := nc.GetNotebookRuntimeTemplates()
+		if err != nil {
+			logrus.Fatal(err)
+		}
+
+		existingTemplates, err := nc.GetNotebookRuntimeTemplates()
+
+		if err != nil {
+			logrus.Fatal(err)
+		}
 
 		for _, template := range existingTemplates.NotebookRuntimeTemplates {
 			prettyPrinter(template)
@@ -49,8 +57,16 @@ var deleteCmd = &cobra.Command{
 
 	Run: func(cmd *cobra.Command, args []string) {
 
-		nc := gcp.NewNotebookClient(projectID)
-		nc.DeleteNotebookRuntimeTemplate(templateName)
+		nc, err := gcp.NewNotebookClient(projectID)
+
+		if err != nil {
+			logrus.Fatal(err)
+		}
+
+		err = nc.DeleteNotebookRuntimeTemplate(templateName)
+		if err != nil {
+			logrus.Fatal(err)
+		}
 	},
 }
 
