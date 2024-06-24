@@ -3,19 +3,14 @@ package gcp
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"path/filepath"
 
 	"net/http"
-	"os"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2/google"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -29,40 +24,41 @@ type NotebookClient struct {
 	token string
 }
 
-type TemplateComparison int
+type ResponseError struct {
+	Code    int
+	Message string
+}
 
-const (
-	DoesNotExist = iota
-	ExistsAndIsIdentical
-	ExistsButIsDifferent
-)
+func (e *ResponseError) Error() string {
+	return fmt.Sprintf("Error response status (%d): %s", e.Code, e.Message)
+}
 
-func NewNotebookClient(projectID string) NotebookClient {
+func NewNotebookClient(projectID string) (*NotebookClient, error) {
 
 	ctx := context.Background()
 
 	creds, err := google.FindDefaultCredentials(ctx, scopes)
 	if err != nil {
-		logrus.Fatalf("Failed to obtain default credentials: %v", err)
+		return nil, err
 	}
 
 	token, err := creds.TokenSource.Token()
 	if err != nil {
-		logrus.Fatalf("Failed to get token: %v", err)
+		return nil, err
 	}
 
-	return NotebookClient{
+	return &NotebookClient{
 		url:   fmt.Sprintf("%s/projects/%s/locations/%s/notebookRuntimeTemplates", serviceEndpoint, projectID, location),
 		token: token.AccessToken,
-	}
+	}, nil
 }
 
-func (nc *NotebookClient) curl(method string, url string, payload io.Reader) []byte {
+func (nc *NotebookClient) curl(method string, url string, payload io.Reader) ([]byte, error) {
 
 	req, err := http.NewRequest(method, url, payload)
 
 	if err != nil {
-		logrus.Fatalf("Failed to create request: %v", err)
+		return nil, err
 	}
 
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", nc.token))
@@ -72,121 +68,57 @@ func (nc *NotebookClient) curl(method string, url string, payload io.Reader) []b
 	resp, err := client.Do(req)
 
 	if err != nil {
-		logrus.Fatalf("Failed to perform request: %v", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 
 	if err != nil {
-		logrus.Fatalf("Failed to read response body: %v", err)
+		return nil, err
 	}
 
 	if resp.StatusCode != 200 {
-		logrus.Fatalf("Status returned: %d (%s)", resp.StatusCode, string(body))
+		return nil, &ResponseError{Code: resp.StatusCode, Message: string(body)}
 	}
 
-	logrus.Debugf("Response status: %s", resp.Status)
-	return body
+	return body, nil
 }
 
-func (nc *NotebookClient) resolve(template NotebookRuntimeTemplate, checksum string) (TemplateComparison, *NotebookRuntimeTemplate) {
+func (nc *NotebookClient) GetNotebookRuntimeTemplates() (*ListNotebookRuntimeTemplatesResult, error) {
 
-	templates := nc.GetNotebookRuntimeTemplates()
+	body, err := nc.curl("GET", nc.url, nil)
 
-	for _, existing := range templates.NotebookRuntimeTemplates {
-
-		if *existing.DisplayName == *template.DisplayName {
-			if (*existing.Labels)["md5"] == checksum {
-				return ExistsAndIsIdentical, &existing
-			}
-			return ExistsButIsDifferent, &existing
-		}
+	if err != nil {
+		return nil, err
 	}
-	return DoesNotExist, nil
-}
-
-func (nc *NotebookClient) GetNotebookRuntimeTemplates() ListNotebookRuntimeTemplatesResult {
-
-	body := nc.curl("GET", nc.url, nil)
 
 	var templates ListNotebookRuntimeTemplatesResult
-	json.Unmarshal(body, &templates)
-	return templates
+	err = json.Unmarshal(body, &templates)
+
+	if err != nil {
+		return nil, err
+	}
+	return &templates, nil
 }
 
-func (nc *NotebookClient) DeleteNotebookRuntimeTemplate(name string) {
+func (nc *NotebookClient) DeleteNotebookRuntimeTemplate(name string) error {
 
 	url := fmt.Sprintf("%s/%s", serviceEndpoint, name)
 	logrus.Infof("Deleting: %s", url)
-	nc.curl("DELETE", url, nil)
+
+	_, err := nc.curl("DELETE", url, nil)
+
+	return err
 }
 
-func (nc *NotebookClient) DeployNotebookRuntimeTemplateFromFile(path string) {
-
-	template, checksum := readTemplateFile(path)
-
-	resolveAction, existing := nc.resolve(template, checksum)
-
-	if resolveAction == ExistsAndIsIdentical {
-		logrus.Infof("Found existing template (%s) with same DisplayName and md5 hash, skipping ..", *existing.DisplayName)
-		return
-	}
-
-	if resolveAction == ExistsButIsDifferent {
-		logrus.Infof("Found existing template (%s) with same DisplayName and a different md5 hash, will delete existing one ..", *existing.DisplayName)
-		nc.DeleteNotebookRuntimeTemplate(*existing.Name)
-	}
-
-	labels := map[string]string{
-		"md5":        checksum,
-		"git_sh":     os.Getenv("GITHUB_SHA"),
-		"git_run_id": os.Getenv("GITHUB_RUN_ID"),
-	}
-
-	if template.Labels != nil {
-		for key, value := range *template.Labels {
-			labels[key] = value
-		}
-	}
-	template.Labels = &labels
+func (nc *NotebookClient) DeployNotebookRuntimeTemplate(template *NotebookRuntimeTemplate) error {
 
 	payload, err := json.Marshal(template)
 
 	if err != nil {
-		logrus.Fatal("Error creating JSON Payload", err)
+		return err
 	}
-
-	nc.curl("POST", nc.url, bytes.NewBuffer(payload))
-}
-
-func readTemplateFile(path string) (NotebookRuntimeTemplate, string) {
-
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		logrus.Fatal("Could not read file", err)
-	}
-
-	hash := md5.New()
-
-	hash.Write(bytes)
-	checksum := hex.EncodeToString(hash.Sum(nil))
-
-	var template NotebookRuntimeTemplate
-
-	ext := filepath.Ext(path)
-
-	switch ext {
-	case ".yaml", ".yml":
-		if err := yaml.Unmarshal(bytes, &template); err != nil {
-			logrus.Fatal("Could not unmarshall JSON file", err)
-		}
-	case ".json":
-		if err := json.Unmarshal(bytes, &template); err != nil {
-			logrus.Fatal("Could not unmarshall JSON file", err)
-		}
-	default:
-		logrus.Fatalf("Unsupported file extension '%s'", ext)
-	}
-	return template, checksum
+	_, err = nc.curl("POST", nc.url, bytes.NewBuffer(payload))
+	return err
 }
