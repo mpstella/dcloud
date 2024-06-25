@@ -9,18 +9,15 @@ Usage:
   dcloud [command]
 
 Available Commands:
-  completion  Generate the autocompletion script for the specified shell
   delete      Delete an existing NotebookRuntimeTemplate
   deploy      Deploy NotebookRuntimeTemplates
-  export      Export an existing NotebookRutimeTemplate
   help        Help about any command
   list        Retrieve existing NotebookRuntimeTemplates
+  version     Show version number of dcloud
 
 Flags:
-      --dry-run   Run the command in dry-run mode
-  -h, --help      help for dcloud
-      --silent    Minimise output to stdout
-  -t, --toggle    Help message for toggle
+  -h, --help     help for dcloud
+  -t, --toggle   Help message for toggle
 
 Use "dcloud [command] --help" for more information about a command.
 ```
@@ -39,65 +36,43 @@ Usage:
   dcloud deploy [project] [pathToTemplates] [flags]
 
 Flags:
-      --dry-run            Run the command in dry-run mode
   -h, --help               help for deploy
       --project string     GCP Project Name
       --templates string   Directory where templates are located
-
-Global Flags:
-      --silent   Minimise output to stdout
+      --threads int        Number of concurrent threads (default 1)
 ```
 
 ### example
 ```text
-$> ./dcloud deploy --project gamma-priceline-playground --templates templates 
-INFO[0000] Logging onto GCP using ADC ...               
-INFO[0000] Attempting to deploy templates/sample.json   
-INFO[0000] Retrieving existing deployed runtime templates ... 
-INFO[0001] Created Notebook Runtime Template: &{0x14000596810} 
-INFO[0001] Attempting to deploy templates/sample2.json  
-INFO[0001] Retrieving existing deployed runtime templates ... 
-INFO[0002] Created Notebook Runtime Template: &{0x140000e6720} 
-INFO[0002] Closing connection to GCP ...    
+$> ./dcloud deploy --project XXXXX --templates templates --threads 10
+INFO[0000] (templates/sample3.json) Parsing template    
+INFO[0000] (templates/sample2.yaml) Parsing template    
+INFO[0000] (templates/sample1.json) Parsing template    
+INFO[0000] (templates/sample3.json) Deploying template. 
+INFO[0000] (templates/sample2.yaml) Deploying template. 
+INFO[0000] (templates/sample1.json) Deploying template. 
+INFO[0001] (templates/sample3.json) Processed template. 
+INFO[0001] (templates/sample2.yaml) Processed template. 
+INFO[0001] (templates/sample1.json) Processed template.   
 ```
 
-### dry-run
-```text
-$> ./dcloud deploy --project gamma-priceline-playground --templates templates --dry-run
-INFO[0000] Attempting to deploy templates/sample.json   
-INFO[0000] Retrieving existing deployed runtime templates ... 
-INFO[0000] This is a dry-run, however, the template would be deployed 
-INFO[0000] Attempting to deploy templates/sample2.json  
-INFO[0000] Retrieving existing deployed runtime templates ... 
-INFO[0000] A template already exists with this Display Name, will check for changes ... 
-INFO[0000] This is a dry-run, however, the template would be deleted as the hashes do not match 
-INFO[0000] This is a dry-run, however, the template would be deployed 
-INFO[0000] Attempting to deploy templates/sample2_duplicate.json 
-INFO[0000] Retrieving existing deployed runtime templates ... 
-INFO[0000] A template already exists with this Display Name, will check for changes ... 
-INFO[0000] Template hash matches ('56f6d374c5d9b04304bc38a069ebbf84') skipping ... 
-INFO[0000] Closing connection to GCP ...     
-```
+
 
 ### idempotent
 ```text
-$> ./dcloud deploy --project gamma-priceline-playground --templates templates
-INFO[0000] Logging onto GCP using ADC ...               
-INFO[0000] Attempting to deploy templates/sample.json   
-INFO[0000] Retrieving existing deployed runtime templates ... 
-INFO[0000] A template already exists with this Display Name, will check for changes ... 
-INFO[0000] Template hash matches ('18879ff2f8ee028deff132b953c534b4') skipping ... 
-INFO[0000] Attempting to deploy templates/sample2.json  
-INFO[0000] Retrieving existing deployed runtime templates ... 
-INFO[0000] A template already exists with this Display Name, will check for changes ... 
-INFO[0000] Template hash matches ('56f6d374c5d9b04304bc38a069ebbf84') skipping ... 
-INFO[0000] Closing connection to GCP ...  
+$> ./dcloud deploy --project XXXXX --templates templates --threads 10
+INFO[0000] (templates/sample1.json) Parsing template    
+INFO[0000] (templates/sample2.yaml) Parsing template    
+INFO[0000] (templates/sample3.json) Parsing template    
+INFO[0000] (templates/sample1.json) Found existing template with same DisplayName and a md5 hash, skipping .. 
+INFO[0000] (templates/sample2.yaml) Found existing template with same DisplayName and a md5 hash, skipping .. 
+INFO[0000] (templates/sample3.json) Found existing template with same DisplayName and a md5 hash, skipping .. 
 ```
 
 ## Get deployed notebook runtime templates
 ### help
 ```text
-$> ./dcloud list -h                           
+$> ./dcloud list --help
 Retrieve existing NotebookRuntimeTemplates
 
 Usage:
@@ -106,96 +81,99 @@ Usage:
 Flags:
   -h, --help             help for list
       --project string   GCP Project Name
-
-Global Flags:
-      --dry-run   Run the command in dry-run mode
-      --silent    Minimise output to stdout
 ```
 ### example
 ```text
-$>  ./dcloud list --project gamma-priceline-playground
-INFO[0000] Logging onto GCP using ADC ...               
-INFO[0000] Retrieving existing deployed runtime templates ... 
+$>  ./dcloud list  --project XXXXX
 INFO[0000] {
-  "Name": "projects/1019340507365/locations/australia-southeast1/notebookRuntimeTemplates/3241888044264980480",
-  "DisplayName": "This is an another example of a runtime template",
-  "Description": "Deployed from sample2.json",
-  "FileHash": "56f6d374c5d9b04304bc38a069ebbf84",
-  "MachineType": "e2-standard-4"
-} 
-INFO[0000] {
-  "Name": "projects/1019340507365/locations/australia-southeast1/notebookRuntimeTemplates/2570851699786776576",
-  "DisplayName": "This is an example of a runtime template",
-  "Description": "Deployed from sample.json",
-  "FileHash": "18879ff2f8ee028deff132b953c534b4",
-  "MachineType": "e2-standard-2"
-} 
-INFO[0000] Closing connection to GCP ... 
-```
-## Export an existing notebook runtime template
-
-### help
-```text
-$> ./dcloud export --help
-Export an existing NotebookRutimeTemplate
-
-Usage:
-  dcloud export [name] [flags]
-
-Flags:
-  -h, --help          help for export
-      --name string   Name of the template
-
-Global Flags:
-      --dry-run   Run the command in dry-run mode
-      --silent    Minimise output to stdout
-```
-
-### example
-```text
-$> ./dcloud export --name "projects/1019340507365/locations/australia-southeast1/notebookRuntimeTemplates/2570851699786776576"
-INFO[0000] Logging onto GCP using ADC ...               
-INFO[0000] {
-  "name": "projects/1019340507365/locations/australia-southeast1/notebookRuntimeTemplates/2570851699786776576",
-  "display_name": "This is an example of a runtime template",
-  "description": "Deployed from sample.json",
-  "machine_spec": {
-    "machine_type": "e2-standard-2"
+  "name": "projects/1019340507365/locations/australia-southeast1/notebookRuntimeTemplates/2933954419743522816",
+  "displayName": "This is an example of a runtime template [sample1.json]",
+  "description": "Deployed from sample1.json",
+  "machineSpec": {
+    "machineType": "e2-standard-2"
   },
-  "data_persistent_disk_spec": {
-    "disk_type": "pd-standard",
-    "disk_size_gb": 10
+  "dataPersistentDiskSpec": {
+    "diskType": "pd-standard",
+    "diskSizeGb": "10"
   },
-  "network_spec": {
-    "enable_internet_access": true,
+  "networkSpec": {
+    "enableInternetAccess": true,
     "network": "projects/1019340507365/global/networks/default"
   },
-  "etag": "AMEw9yOC7ouezSgCrI0ZeAj-_BOAVFGRnmg3sq8G1sWIE2UHAAAx6ktVVS_3XUzdRgfU",
+  "etag": "AMEw9yOL_SUIaJb8cHdsiC3i-0gwovQ6Wph6kjILvMJX_L-XJjlzHuWutNTXOpcqjiZT",
   "labels": {
-    "git_run_id": "",
-    "git_sha": "",
-    "md5": "18879ff2f8ee028deff132b953c534b4",
-    "source": "sample"
+    "deployment_ts_utc": "20240625_053002",
+    "env": "dev2",
+    "md5": "bd1be799f147d7f3cee1cac98fba3066",
+    "source": "sample1"
   },
-  "idle_shutdown_config": {
-    "idle_timeout": {
-      "seconds": 600
-    }
+  "idleShutdownConfig": {
+    "idleTimeout": "600s"
   },
-  "euc_config": {},
-  "create_time": {
-    "seconds": 1718587516,
-    "nanos": 808801000
-  },
-  "update_time": {
-    "seconds": 1718587516,
-    "nanos": 808801000
-  },
-  "notebook_runtime_type": 1
+  "eucConfig": {},
+  "createTime": "2024-06-25T05:30:04.856134Z",
+  "updateTime": "2024-06-25T05:30:04.856134Z",
+  "notebookRuntimeType": "USER_DEFINED"
 } 
-INFO[0000] Closing connection to GCP ...   
+INFO[0000] {
+  "name": "projects/1019340507365/locations/australia-southeast1/notebookRuntimeTemplates/4075616925281943552",
+  "displayName": "This is an example of a runtime template [sample2.yaml]",
+  "description": "Deployed from sample2.yaml",
+  "machineSpec": {
+    "machineType": "e2-standard-4"
+  },
+  "dataPersistentDiskSpec": {
+    "diskType": "pd-standard",
+    "diskSizeGb": "10"
+  },
+  "networkSpec": {
+    "enableInternetAccess": true,
+    "network": "projects/1019340507365/global/networks/default"
+  },
+  "etag": "AMEw9yPXdMyvHsDHrwQi2D5zByAuKra0TtXfUgPJbsxfha9JLtc_HZ3TA8g68NxKcsYP",
+  "labels": {
+    "deployment_ts_utc": "20240625_053002",
+    "md5": "2b881d4beafacc8cd0d9fcb9420b82fe"
+  },
+  "idleShutdownConfig": {
+    "idleTimeout": "600s"
+  },
+  "eucConfig": {},
+  "createTime": "2024-06-25T05:30:04.836839Z",
+  "updateTime": "2024-06-25T05:30:04.836839Z",
+  "notebookRuntimeType": "USER_DEFINED"
+} 
+INFO[0000] {
+  "name": "projects/1019340507365/locations/australia-southeast1/notebookRuntimeTemplates/7676244827364655104",
+  "displayName": "This is an example of a runtime template [sample3.json]",
+  "description": "Deployed from sample3.json",
+  "machineSpec": {
+    "machineType": "e2-standard-4"
+  },
+  "dataPersistentDiskSpec": {
+    "diskType": "pd-standard",
+    "diskSizeGb": "10"
+  },
+  "networkSpec": {
+    "enableInternetAccess": true,
+    "network": "projects/1019340507365/global/networks/default"
+  },
+  "etag": "AMEw9yMHlv6Q12FCIiGMzRnQkwscZcdGK0_dVlHelcxD4rSTvTveR2y95umxRwWcvinA",
+  "labels": {
+    "deployment_ts_utc": "20240625_053002",
+    "md5": "10b06b42701ada152dc131ff0148fce0"
+  },
+  "idleShutdownConfig": {
+    "idleTimeout": "600s"
+  },
+  "eucConfig": {},
+  "createTime": "2024-06-25T05:30:04.618378Z",
+  "updateTime": "2024-06-25T05:30:04.618378Z",
+  "notebookRuntimeType": "USER_DEFINED"
+} 
 ```
 
+```
 ## Delete existing notebook runtime templates
 
 ## help
@@ -209,16 +187,9 @@ Usage:
 Flags:
   -h, --help          help for delete
       --name string   Name of the template
-
-Global Flags:
-      --dry-run   Run the command in dry-run mode
-      --silent    Minimise output to stdout
 ```
 
 ## example
 ```text
-$> ./dcloud delete  --name "projects/1019340507365/locations/australia-southeast1/notebookRuntimeTemplates/2570851699786776576"
-INFO[0000] Logging onto GCP using ADC ...               
-INFO[0000] Deleted Notebook Runtime Template &{0x14000130af8}
-INFO[0000] Closing connection to GCP ...              
+$> ./dcloud delete --name "projects/1019340507365/locations/australia-southeast1/notebookRuntimeTemplates/7676244827364655104"     
 ```

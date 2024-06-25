@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/mpstella/dcloud/pkg/gcp"
@@ -14,6 +15,7 @@ var (
 	projectID         string
 	templateName      string
 	templateDirectory string
+	version           string = "v0.1.4"
 )
 
 func prettyPrinter(arg interface{}) {
@@ -25,6 +27,18 @@ var rootCmd = &cobra.Command{
 	Use:   "dcloud",
 	Short: "DAW gcloud makeshift utility",
 	Long:  `Given we are waiting on Google this is our dodgy gcloud helper`,
+	CompletionOptions: cobra.CompletionOptions{
+		DisableDefaultCmd: true,
+	},
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Show version number of dcloud",
+
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("Version: %s\n", version)
+	},
 }
 
 var listCmd = &cobra.Command{
@@ -88,5 +102,5 @@ func init() {
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 
 	// add all the commands here
-	rootCmd.AddCommand(listCmd, deleteCmd)
+	rootCmd.AddCommand(versionCmd, listCmd, deleteCmd)
 }
