@@ -9,7 +9,6 @@ import (
 
 	"net/http"
 
-	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2/google"
 )
 
@@ -87,7 +86,7 @@ func (nc *NotebookClient) curl(method string, url string, payload io.Reader) ([]
 
 func (nc *NotebookClient) GetNotebookRuntimeTemplates() (*ListNotebookRuntimeTemplatesResult, error) {
 
-	body, err := nc.curl("GET", nc.url, nil)
+	body, err := nc.curl(http.MethodGet, nc.url, nil)
 
 	if err != nil {
 		return nil, err
@@ -105,9 +104,7 @@ func (nc *NotebookClient) GetNotebookRuntimeTemplates() (*ListNotebookRuntimeTem
 func (nc *NotebookClient) DeleteNotebookRuntimeTemplate(name string) error {
 
 	url := fmt.Sprintf("%s/%s", serviceEndpoint, name)
-	logrus.Infof("Deleting: %s", url)
-
-	_, err := nc.curl("DELETE", url, nil)
+	_, err := nc.curl(http.MethodDelete, url, nil)
 
 	return err
 }
@@ -119,6 +116,6 @@ func (nc *NotebookClient) DeployNotebookRuntimeTemplate(template *NotebookRuntim
 	if err != nil {
 		return err
 	}
-	_, err = nc.curl("POST", nc.url, bytes.NewBuffer(payload))
+	_, err = nc.curl(http.MethodPost, nc.url, bytes.NewBuffer(payload))
 	return err
 }

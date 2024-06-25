@@ -23,7 +23,7 @@ func processFile(path string, wg *sync.WaitGroup, ch chan<- string, errCh chan<-
 	defer wg.Done()
 	defer func() { <-sem }() // Release the spot in the semaphore when the goroutine completes
 
-	logrus.Infof("Parsing template %s", path)
+	logrus.Infof("(%s) Parsing template", path)
 
 	template := gcp.NewNotebookRuntimeTemplateFromFile(path)
 
@@ -34,21 +34,20 @@ func processFile(path string, wg *sync.WaitGroup, ch chan<- string, errCh chan<-
 		return
 	}
 
+	var templateToDelete *gcp.NotebookRuntimeTemplate
+
 	for _, existing := range templates.NotebookRuntimeTemplates {
 
 		comparisonResult := template.ComparesTo(&existing)
 
 		if comparisonResult == gcp.Identical {
-			ch <- fmt.Sprintf("Found existing template (%s) with same DisplayName and a md5 hash, skipping ..", *existing.DisplayName)
+			ch <- fmt.Sprintf("(%s) Found existing template with same DisplayName and a md5 hash, skipping ..", path)
 			return
 		}
 
 		if comparisonResult == gcp.Different {
-			ch <- fmt.Sprintf("Found existing template (%s) with same DisplayName and a different md5 hash, will delete existing one ..", *existing.DisplayName)
-			err := notebookClient.DeleteNotebookRuntimeTemplate(*existing.Name)
-			if err != nil {
-				errCh <- err
-			}
+			logrus.Infof("(%s) Found existing template with same DisplayName and a different md5 hash, will delete existing one post deployment..", path)
+			templateToDelete = &existing
 			break
 		}
 	}
@@ -66,13 +65,23 @@ func processFile(path string, wg *sync.WaitGroup, ch chan<- string, errCh chan<-
 	}
 
 	// deploy first as this does not impact any existing templates
+	logrus.Infof("(%s) Deploying template.", path)
 	err = notebookClient.DeployNotebookRuntimeTemplate(template)
 
 	if err != nil {
 		errCh <- err
-	} else {
-		ch <- fmt.Sprintf("Processed template: %s\n", path)
+		return
 	}
+
+	if templateToDelete != nil {
+		logrus.Infof("(%s) Deleting template: %s", path, *templateToDelete.Name)
+		err := notebookClient.DeleteNotebookRuntimeTemplate(*templateToDelete.Name)
+		if err != nil {
+			errCh <- err
+			return
+		}
+	}
+	ch <- fmt.Sprintf("(%s) Processed template.", path)
 }
 
 var deployCmd = &cobra.Command{
