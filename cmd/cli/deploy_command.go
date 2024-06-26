@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/mpstella/dcloud/pkg/gcp"
-	"github.com/sirupsen/logrus"
+
 	"github.com/spf13/cobra"
 )
 
@@ -18,21 +18,13 @@ var (
 	notebookClient           *gcp.NotebookClient
 )
 
-func processFile(path string, wg *sync.WaitGroup, ch chan<- string, errCh chan<- error, sem chan struct{}) {
+func processFile(path string) {
 
-	defer wg.Done()
-	defer func() { <-sem }() // Release the spot in the semaphore when the goroutine completes
-
-	logrus.Infof("(%s) Parsing template", path)
+	fmt.Printf("Parsing template: %s\n", path)
 
 	template := gcp.NewNotebookRuntimeTemplateFromFile(path)
 
 	templates, err := notebookClient.GetNotebookRuntimeTemplates()
-
-	if err != nil {
-		errCh <- err
-		return
-	}
 
 	var templateToDelete *gcp.NotebookRuntimeTemplate
 
@@ -41,12 +33,12 @@ func processFile(path string, wg *sync.WaitGroup, ch chan<- string, errCh chan<-
 		comparisonResult := template.ComparesTo(&existing)
 
 		if comparisonResult == gcp.Identical {
-			ch <- fmt.Sprintf("(%s) Found existing template with same DisplayName and a md5 hash, skipping ..", path)
+			fmt.Println("Found existing template with same DisplayName and a md5 hash, skipping ..")
 			return
 		}
 
 		if comparisonResult == gcp.Different {
-			logrus.Infof("(%s) Found existing template with same DisplayName and a different md5 hash, will delete existing one post deployment..", path)
+			fmt.Println("Found existing template with same DisplayName and a different md5 hash, will delete existing one post deployment..")
 			templateToDelete = &existing
 			break
 		}
@@ -65,23 +57,22 @@ func processFile(path string, wg *sync.WaitGroup, ch chan<- string, errCh chan<-
 	}
 
 	// deploy first as this does not impact any existing templates
-	logrus.Infof("(%s) Deploying template.", path)
+	fmt.Println("Deploying template.")
 	err = notebookClient.DeployNotebookRuntimeTemplate(template)
 
 	if err != nil {
-		errCh <- err
-		return
+		log.Fatalf("Deploy failed %v\n", err)
 	}
 
 	if templateToDelete != nil {
-		logrus.Infof("(%s) Deleting template: %s", path, *templateToDelete.Name)
+		fmt.Printf("Deleting template: %s\n", *templateToDelete.Name)
 		err := notebookClient.DeleteNotebookRuntimeTemplate(*templateToDelete.Name)
+
 		if err != nil {
-			errCh <- err
-			return
+			log.Fatalf("Deletion failed: %v\n", err)
 		}
 	}
-	ch <- fmt.Sprintf("(%s) Processed template.", path)
+	fmt.Println("Processed template.")
 }
 
 var deployCmd = &cobra.Command{
@@ -93,42 +84,20 @@ var deployCmd = &cobra.Command{
 		templates, err := os.ReadDir(templateDirectory)
 
 		if err != nil {
-			logrus.Fatalf("Error occurred reading directory %v", err)
+			log.Fatal(fmt.Errorf("error occurred reading directory %v", err))
 		}
 
 		notebookClient, err = gcp.NewNotebookClient(projectID)
 
 		if err != nil {
-			logrus.Fatal(err)
+			log.Fatal(fmt.Errorf("could not createa a client %v", err))
 		}
-
-		var wg sync.WaitGroup
-		contentCh := make(chan string, len(templates))
-		errorCh := make(chan error, len(templates))
-		sem := make(chan struct{}, maximumConcurrentThreads)
 
 		for _, entry := range templates {
 
 			if !entry.IsDir() {
-				wg.Add(1)
-				sem <- struct{}{} // Acquire a spot in the semaphore
-				go processFile(filepath.Join(templateDirectory, entry.Name()), &wg, contentCh, errorCh, sem)
+				processFile(filepath.Join(templateDirectory, entry.Name()))
 			}
-		}
-
-		go func() {
-			wg.Wait()
-			close(contentCh)
-			close(errorCh)
-		}()
-
-		for content := range contentCh {
-			logrus.Info(content)
-		}
-
-		// Handle any errors
-		for err := range errorCh {
-			logrus.Error(err)
 		}
 	},
 }
