@@ -15,7 +15,7 @@ var (
 	projectID         string
 	templateName      string
 	templateDirectory string
-	version           string = "v0.1.4"
+	version           string = "v0.1.6"
 )
 
 func prettyPrinter(arg interface{}) {

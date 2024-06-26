@@ -15,17 +15,12 @@ import (
 var deploymentTimestampUTC string
 
 type localTemplate struct {
-	path                   string
+	path                   string // template filepath
 	template               *gcp.NotebookRuntimeTemplate
-	matchingRemoteTemplate *gcp.NotebookRuntimeTemplate
+	matchingRemoteTemplate *gcp.NotebookRuntimeTemplate // only set if we have to perform a delete
 }
 
-type deploymentActions struct {
-	toBeDeployed []*localTemplate
-	toBeDeleted  []*localTemplate
-}
-
-func sortItOut(nc *gcp.NotebookClient, localTemplates []*localTemplate) (*deploymentActions, error) {
+func sortItOut(nc *gcp.NotebookClient, localTemplates []*localTemplate) (*[]*localTemplate, error) {
 
 	existingTemplates, err := nc.GetNotebookRuntimeTemplates()
 
@@ -33,7 +28,7 @@ func sortItOut(nc *gcp.NotebookClient, localTemplates []*localTemplate) (*deploy
 		return nil, err
 	}
 
-	actions := deploymentActions{}
+	var templatesToBeDeployed []*localTemplate
 
 	for _, lt := range localTemplates {
 
@@ -45,15 +40,14 @@ func sortItOut(nc *gcp.NotebookClient, localTemplates []*localTemplate) (*deploy
 		}
 
 		// if we get here we either have a new template or need to 'modify' an existing.
-		actions.toBeDeployed = append(actions.toBeDeployed, lt)
+		templatesToBeDeployed = append(templatesToBeDeployed, lt)
 
 		if comparisonResult == gcp.Different {
 			fmt.Printf("Template '%s' matches '%s' but has changed - marking for future delete\n", lt.path, *matchedTemplate.Name)
 			lt.matchingRemoteTemplate = matchedTemplate
-			actions.toBeDeleted = append(actions.toBeDeleted, lt)
 		}
 	}
-	return &actions, nil
+	return &templatesToBeDeployed, nil
 }
 
 func deployTemplate(nc *gcp.NotebookClient, template *gcp.NotebookRuntimeTemplate) error {
@@ -89,7 +83,7 @@ var deployCmd = &cobra.Command{
 			log.Fatal(fmt.Errorf("error occurred reading directory %v", err))
 		}
 
-		var notebookRuntimeTemplates = make([]*localTemplate, len(templates))
+		notebookRuntimeTemplates := make([]*localTemplate, len(templates))
 
 		// let's read everything first in case we get an error
 		for i, entry := range templates {
@@ -116,17 +110,25 @@ var deployCmd = &cobra.Command{
 			log.Fatal(fmt.Errorf("error in comparison %v", err))
 		}
 
-		fmt.Printf("Deploy Count: %d\nDelete Count: %d\n", len(actions.toBeDeployed), len(actions.toBeDeleted))
+		deleteCount := 0
+		for _, d := range *actions {
+			if d.matchingRemoteTemplate != nil {
+				deleteCount++
+			}
+		}
+		fmt.Printf("Deploy Count: %d\nDelete Count: %d\n", len(*actions), deleteCount)
 
-		for _, d := range actions.toBeDeployed {
+		for _, d := range *actions {
 			fmt.Printf("Deploying template: %s\n", d.path)
 			deployTemplate(nc, d.template)
 		}
 
-		for _, d := range actions.toBeDeleted {
-			existingName := *d.matchingRemoteTemplate.Name
-			fmt.Printf("Deleting matched template (%s) -> %s\n", d.path, existingName)
-			nc.DeleteNotebookRuntimeTemplate(existingName)
+		for _, d := range *actions {
+			if d.matchingRemoteTemplate != nil {
+				existingName := *d.matchingRemoteTemplate.Name
+				fmt.Printf("Deleting matched template (%s) -> %s\n", d.path, existingName)
+				nc.DeleteNotebookRuntimeTemplate(existingName)
+			}
 		}
 	},
 }
