@@ -4,10 +4,12 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 
-	"github.com/sirupsen/logrus"
+	"fmt"
+
 	"gopkg.in/yaml.v2"
 )
 
@@ -23,7 +25,7 @@ func NewNotebookRuntimeTemplateFromFile(path string) *NotebookRuntimeTemplate {
 
 	bytes, err := os.ReadFile(path)
 	if err != nil {
-		logrus.Fatal("Could not read file", err)
+		log.Fatal(fmt.Errorf("Could not read file: %v", err))
 	}
 
 	hash := md5.New()
@@ -38,14 +40,14 @@ func NewNotebookRuntimeTemplateFromFile(path string) *NotebookRuntimeTemplate {
 	switch ext {
 	case ".yaml", ".yml":
 		if err := yaml.Unmarshal(bytes, &template); err != nil {
-			logrus.Fatal("Could not unmarshall JSON file", err)
+			log.Fatal(fmt.Errorf("could not unmarshall YAML file: %v", err))
 		}
 	case ".json":
 		if err := json.Unmarshal(bytes, &template); err != nil {
-			logrus.Fatal("Could not unmarshall JSON file", err)
+			log.Fatal(fmt.Errorf("could not unmarshall JSON file: %v", err))
 		}
 	default:
-		logrus.Fatalf("Unsupported file extension '%s'", ext)
+		log.Fatalf(fmt.Sprintf("Unsupported file extension '%s'", ext))
 	}
 
 	template.AddLabel("md5", checksum)
@@ -68,7 +70,8 @@ func (t *NotebookRuntimeTemplate) ComparesTo(c *NotebookRuntimeTemplate) Templat
 
 		// deployed template does not have any labels
 		if c.Labels == nil {
-			logrus.Warn("Found matching template with no labels attached")
+
+			fmt.Println("Warning: Found matching deployed template with no labels attached")
 			return Different
 		}
 
@@ -82,7 +85,7 @@ func (t *NotebookRuntimeTemplate) ComparesTo(c *NotebookRuntimeTemplate) Templat
 			}
 
 		}
-		logrus.Warn("Found matching template with no md5 label")
+		fmt.Println("Warning: Found matching template with no md5 label")
 		return Different
 	}
 	return DoesNotMatch

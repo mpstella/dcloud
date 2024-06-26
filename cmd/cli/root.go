@@ -3,10 +3,10 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/mpstella/dcloud/pkg/gcp"
-	"github.com/sirupsen/logrus"
 
 	"github.com/spf13/cobra"
 )
@@ -20,7 +20,7 @@ var (
 
 func prettyPrinter(arg interface{}) {
 	prettyString, _ := json.MarshalIndent(arg, "", "  ")
-	logrus.Infof("%s", string(prettyString))
+	fmt.Printf("%s\n", string(prettyString))
 }
 
 var rootCmd = &cobra.Command{
@@ -50,18 +50,17 @@ var listCmd = &cobra.Command{
 		nc, err := gcp.NewNotebookClient(projectID)
 
 		if err != nil {
-			logrus.Fatal(err)
+			log.Fatalf("Could not get client %v\n", err)
 		}
 
 		existingTemplates, err := nc.GetNotebookRuntimeTemplates()
 
 		if err != nil {
-			logrus.Fatal(err)
+			log.Fatalf("Failed to retreive templates: %v\n", err)
 		}
 
-		for _, template := range existingTemplates.NotebookRuntimeTemplates {
-			prettyPrinter(template)
-		}
+		prettyPrinter(existingTemplates.NotebookRuntimeTemplates)
+
 	},
 }
 
@@ -74,12 +73,12 @@ var deleteCmd = &cobra.Command{
 		nc, err := gcp.NewNotebookClient(projectID)
 
 		if err != nil {
-			logrus.Fatal(err)
+			log.Fatal(err)
 		}
 
 		err = nc.DeleteNotebookRuntimeTemplate(templateName)
 		if err != nil {
-			logrus.Fatal(err)
+			log.Fatal(err)
 		}
 	},
 }

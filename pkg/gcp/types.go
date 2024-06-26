@@ -6,7 +6,7 @@ type MachineSpec struct {
 	MachineType      *string `json:"machineType,omitempty" yaml:"machineType,omitempty"`
 	AcceleratorType  *string `json:"acceleratorType,omitempty" yaml:"acceleratorType,omitempty"`
 	AcceleratorCount *int    `json:"acceleratorCount,omitempty" yaml:"acceleratorCount,omitempty"`
-	TpuTopology      *string `json:"tpuTopology,omitempty" yaml:"tpuTopology,omitempty"`
+	TpuTopofmty      *string `json:"tpuTopofmty,omitempty" yaml:"tpuTopofmty,omitempty"`
 }
 
 type DataPersistentDiskSpec struct {

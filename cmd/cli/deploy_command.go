@@ -2,56 +2,61 @@ package cmd
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/mpstella/dcloud/pkg/gcp"
-	"github.com/sirupsen/logrus"
+
 	"github.com/spf13/cobra"
 )
 
-var (
-	maximumConcurrentThreads int
-	deploymentTimestampUTC   string
-	notebookClient           *gcp.NotebookClient
-)
+var deploymentTimestampUTC string
 
-func processFile(path string, wg *sync.WaitGroup, ch chan<- string, errCh chan<- error, sem chan struct{}) {
+type localTemplate struct {
+	path                   string
+	template               *gcp.NotebookRuntimeTemplate
+	matchingRemoteTemplate *gcp.NotebookRuntimeTemplate
+}
 
-	defer wg.Done()
-	defer func() { <-sem }() // Release the spot in the semaphore when the goroutine completes
+type deploymentActions struct {
+	toBeDeployed []*localTemplate
+	toBeDeleted  []*localTemplate
+}
 
-	logrus.Infof("(%s) Parsing template", path)
+func sortItOut(nc *gcp.NotebookClient, localTemplates []*localTemplate) (*deploymentActions, error) {
 
-	template := gcp.NewNotebookRuntimeTemplateFromFile(path)
-
-	templates, err := notebookClient.GetNotebookRuntimeTemplates()
+	existingTemplates, err := nc.GetNotebookRuntimeTemplates()
 
 	if err != nil {
-		errCh <- err
-		return
+		return nil, err
 	}
 
-	var templateToDelete *gcp.NotebookRuntimeTemplate
+	actions := deploymentActions{}
 
-	for _, existing := range templates.NotebookRuntimeTemplates {
+	for _, lt := range localTemplates {
 
-		comparisonResult := template.ComparesTo(&existing)
+		matchedTemplate, comparisonResult := existingTemplates.Compare(lt.template)
 
 		if comparisonResult == gcp.Identical {
-			ch <- fmt.Sprintf("(%s) Found existing template with same DisplayName and a md5 hash, skipping ..", path)
-			return
+			fmt.Printf("Template '%s' matches '%s' - skipping\n", lt.path, *matchedTemplate.Name)
+			continue
 		}
 
+		// if we get here we either have a new template or need to 'modify' an existing.
+		actions.toBeDeployed = append(actions.toBeDeployed, lt)
+
 		if comparisonResult == gcp.Different {
-			logrus.Infof("(%s) Found existing template with same DisplayName and a different md5 hash, will delete existing one post deployment..", path)
-			templateToDelete = &existing
-			break
+			fmt.Printf("Template '%s' matches '%s' but has changed - marking for future delete\n", lt.path, *matchedTemplate.Name)
+			lt.matchingRemoteTemplate = matchedTemplate
+			actions.toBeDeleted = append(actions.toBeDeleted, lt)
 		}
 	}
-	// if we get to here we are ready to deploy
+	return &actions, nil
+}
+
+func deployTemplate(nc *gcp.NotebookClient, template *gcp.NotebookRuntimeTemplate) error {
 
 	// add a bunch of labels to the resource so we can track deployments
 	template.AddLabel("deployment_ts_utc", deploymentTimestampUTC)
@@ -64,24 +69,12 @@ func processFile(path string, wg *sync.WaitGroup, ch chan<- string, errCh chan<-
 		template.AddLabel("git_run_id", val)
 	}
 
-	// deploy first as this does not impact any existing templates
-	logrus.Infof("(%s) Deploying template.", path)
-	err = notebookClient.DeployNotebookRuntimeTemplate(template)
+	err := nc.DeployNotebookRuntimeTemplate(template)
 
 	if err != nil {
-		errCh <- err
-		return
+		return err
 	}
-
-	if templateToDelete != nil {
-		logrus.Infof("(%s) Deleting template: %s", path, *templateToDelete.Name)
-		err := notebookClient.DeleteNotebookRuntimeTemplate(*templateToDelete.Name)
-		if err != nil {
-			errCh <- err
-			return
-		}
-	}
-	ch <- fmt.Sprintf("(%s) Processed template.", path)
+	return nil
 }
 
 var deployCmd = &cobra.Command{
@@ -93,42 +86,47 @@ var deployCmd = &cobra.Command{
 		templates, err := os.ReadDir(templateDirectory)
 
 		if err != nil {
-			logrus.Fatalf("Error occurred reading directory %v", err)
+			log.Fatal(fmt.Errorf("error occurred reading directory %v", err))
 		}
 
-		notebookClient, err = gcp.NewNotebookClient(projectID)
+		var notebookRuntimeTemplates = make([]*localTemplate, len(templates))
 
-		if err != nil {
-			logrus.Fatal(err)
-		}
+		// let's read everything first in case we get an error
+		for i, entry := range templates {
 
-		var wg sync.WaitGroup
-		contentCh := make(chan string, len(templates))
-		errorCh := make(chan error, len(templates))
-		sem := make(chan struct{}, maximumConcurrentThreads)
+			templateFile := filepath.Join(templateDirectory, entry.Name())
 
-		for _, entry := range templates {
+			fmt.Printf("Reading template: %s\n", templateFile)
 
-			if !entry.IsDir() {
-				wg.Add(1)
-				sem <- struct{}{} // Acquire a spot in the semaphore
-				go processFile(filepath.Join(templateDirectory, entry.Name()), &wg, contentCh, errorCh, sem)
+			notebookRuntimeTemplates[i] = &localTemplate{
+				path:     templateFile,
+				template: gcp.NewNotebookRuntimeTemplateFromFile(templateFile),
 			}
 		}
 
-		go func() {
-			wg.Wait()
-			close(contentCh)
-			close(errorCh)
-		}()
+		nc, err := gcp.NewNotebookClient(projectID)
 
-		for content := range contentCh {
-			logrus.Info(content)
+		if err != nil {
+			log.Fatal(fmt.Errorf("could not createa a client %v", err))
 		}
 
-		// Handle any errors
-		for err := range errorCh {
-			logrus.Error(err)
+		actions, err := sortItOut(nc, notebookRuntimeTemplates)
+
+		if err != nil {
+			log.Fatal(fmt.Errorf("error in comparison %v", err))
+		}
+
+		fmt.Printf("Deploy Count: %d\nDelete Count: %d\n", len(actions.toBeDeployed), len(actions.toBeDeleted))
+
+		for _, d := range actions.toBeDeployed {
+			fmt.Printf("Deploying template: %s\n", d.path)
+			deployTemplate(nc, d.template)
+		}
+
+		for _, d := range actions.toBeDeleted {
+			existingName := *d.matchingRemoteTemplate.Name
+			fmt.Printf("Deleting matched template (%s) -> %s\n", d.path, existingName)
+			nc.DeleteNotebookRuntimeTemplate(existingName)
 		}
 	},
 }
@@ -140,7 +138,6 @@ func init() {
 
 	deployCmd.PersistentFlags().StringVar(&projectID, "project", "", "GCP Project Name")
 	deployCmd.PersistentFlags().StringVar(&templateDirectory, "templates", "", "Directory where templates are located")
-	deployCmd.PersistentFlags().IntVar(&maximumConcurrentThreads, "threads", 1, "Number of concurrent threads")
 
 	deployCmd.MarkPersistentFlagRequired("project")
 	deployCmd.MarkPersistentFlagRequired("templates")
